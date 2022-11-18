@@ -1,0 +1,11 @@
+Dockerfile
+.git
+.gitignore
+.*.md
+.*.pyc
+.*.pyo
+.*.pyd
+.*.onnx
+.*.ttf
+.pytest_cache
+__pycache__

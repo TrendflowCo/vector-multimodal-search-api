@@ -1,0 +1,18 @@
+steps:
+# Build the container image
+- name: 'gcr.io/cloud-builders/docker'
+  args: ['build', '-t', 'gcr.io/deeplogo/clipfashion', '.']
+# Push the container image to Container Registry
+- name: 'gcr.io/cloud-builders/docker'
+  args: ['push', 'gcr.io/deeplogo/clipfashion']
+# Deploy container image to Cloud Run
+- name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+  entrypoint: gcloud
+  args: ['run', 'deploy', 'clipfashion', 
+        '--image', 'gcr.io/deeplogo/clipfashion', 
+        '--region', 'us-east1', 
+        '--cpu', '4',
+        '--memory', '16Gi']
+images:
+- gcr.io/deeplogo/clipfashion
+timeout: '3600s'

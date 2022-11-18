@@ -51,7 +51,7 @@ def get_similarity(image_features, text_features):
     similarity = text_features.cpu().numpy() @ image_features.cpu().numpy().T
     return similarity
 
-def retrieve_most_similar_images(prompt, max_k=30, threshold = 0.19):
+def retrieve_most_similar_images(prompt, max_k=30, threshold = 0.1):
     
     e_t = compute_text_embeddings(prompt)
     

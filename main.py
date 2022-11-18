@@ -22,10 +22,14 @@ with open('./data/mango_embeddings_small_cpu.pkl', 'rb') as f:
 with open('./data/zara_embeddings_small_cpu.pkl', 'rb') as f:
     e_zara = cpickle.load(f)
     
+with open('./data/vogue_embeddings.pkl', 'rb') as f:
+    e_vogue = cpickle.load(f)
     
 mango_df = pd.read_csv('./data/mango_small.csv', index_col=[0])
 zara_df = pd.read_csv('./data/zara_small.csv', index_col=[0])
+vogue_df = pd.read_csv('./data/vogue.csv', index_col=[0])
 
+BLACKLIST = ['SUDADERA MUÑECO DE NIEVE']
 
 all_data = {
     'mango': {
@@ -35,6 +39,10 @@ all_data = {
     'zara': {
         'images': zara_df,
         'embeddings': e_zara
+        },
+    'vogue': {
+        'images': vogue_df,
+        'embeddings': e_vogue
         }
     }
 
@@ -51,7 +59,7 @@ def get_similarity(image_features, text_features):
     similarity = text_features.cpu().numpy() @ image_features.cpu().numpy().T
     return similarity
 
-def retrieve_most_similar_images(prompt, max_k=30, threshold = 0.1):
+def retrieve_most_similar_images(prompt, max_k=30, threshold = 0.17):
     
     e_t = compute_text_embeddings(prompt)
     
@@ -66,19 +74,21 @@ def retrieve_most_similar_images(prompt, max_k=30, threshold = 0.1):
                     item_data = {}
                     item_data['similarity'] = similarity
                     item_data['brand'] = source
-                    item_data['name'] = images_df.loc[k]['name']
-                    item_data['category'] = images_df.loc[k]['category']
-                    item_data['img_urls'] = images_df.loc[k]['img_urls']
-                    similar_items.append(item_data)
+                    item_data['name'] = images_df.loc[k].get('name')
+                    item_data['category'] = images_df.loc[k].get('category')
+                    item_data['img_urls'] = images_df.loc[k].get('img_urls')
                     
-    return pd.DataFrame(similar_items).nlargest(max_k, 'similarity').to_dict('records')
+                    if item_data['name'] not in BLACKLIST:
+                        similar_items.append(item_data)
+                    
+    return pd.DataFrame(similar_items).sort_values(by='similarity', ascending=False).head(max_k).to_dict('records')
 
 @app.route("/api/v1/search", methods=["GET"])
 def index():
     text = request.args.get('query')
     if text is None:
         make_response(jsonify({'error': 'Missing text parameter'}), 400)
-    results = [v for v in retrieve_most_similar_images(text)]
+    results = retrieve_most_similar_images(text)
 
     return jsonify(results)
 

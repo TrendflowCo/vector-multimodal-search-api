@@ -9,6 +9,8 @@ import numpy as np
 from tqdm import tqdm
 import pickle
 import io
+import fetch_data
+import json
 
 class CPU_Unpickler(pickle.Unpickler):
     def find_class(self, module, name):
@@ -29,10 +31,14 @@ vocab_size = model.vocab_size
 
 blacklist = ['https://www.stradivarius.com/es/coletero-grande-saten-l00150411']
 
-images_df = pd.read_csv('./data/all_brands.csv', index_col=[0]).set_index('img_url')
+TABLE_ID = 'dokuso.listing_products.items_details'
+query = f"SELECT * FROM `{TABLE_ID}`"
+images_df = fetch_data.query_datasets_to_df(query).set_index('img_url')
 
-blacklist_img_urls = images_df[images_df['shop_link'].isin(blacklist)]
-# images_df = images_df[~images_df['shop_link'].isin(blacklist)]
+#images_df = pd.read_csv('./data/all_brands.csv', index_col=[0]).set_index('img_url')
+blacklist_img_url = images_df[images_df['shop_link'].isin(blacklist)].index.tolist()
+print('blacklist_img_url', blacklist_img_url)
+images_df = images_df[~images_df['shop_link'].isin(blacklist)]
 
 with open('./data/all_images.pkl', 'rb') as f:
     # e_img = cpickle.load(f)
@@ -81,26 +87,27 @@ def retrieve_most_similar_images(prompt, max_k=100, threshold = 0.2):
     for idx in top_idx:
         idx = (idx.item())
         idx_ = e_img_df.index[idx]
-        if idx_ not in blacklist_img_urls:
+        if idx_ not in blacklist_img_url:
             item_data = {}
+            item_data['id'] = images_df.loc[idx_]['id']
             item_data['similarity'] = similarity[:, idx].max().item()
             item_data['brand'] = images_df.loc[idx_]['brand']
             item_data['name'] = images_df.loc[idx_].get('name')
-            item_data['category'] = images_df.loc[idx_].get('section')
-            item_data['img_urls'] = idx_
+            item_data['section'] = images_df.loc[idx_].get('section')
+            item_data['img_url'] = idx_
             item_data['price'] = images_df.loc[idx_].get('price')
             item_data['price_float'] = images_df.loc[idx_].get('price_float')
             item_data['old_price'] = images_df.loc[idx_].get('old_price')
             item_data['old_price_float'] = images_df.loc[idx_].get('old_price_float')
             item_data['discount_rate'] = images_df.loc[idx_].get('discount_rate')
-            item_data['sale'] = images_df.loc[idx_].get('sale')
+            item_data['sale'] = bool(images_df.loc[idx_].get('sale'))
             item_data['shop_link'] = images_df.loc[idx_].get('shop_link')
             similar_items.append(item_data)
         
     if len(similar_items)>0:
         similar_items = pd.DataFrame(similar_items)
         similar_items = similar_items.sort_values(by='similarity', ascending=False)
-        similar_items = similar_items.drop_duplicates(subset=['img_urls'], keep='first')
+        similar_items = similar_items.drop_duplicates(subset=['img_url'], keep='first')
         if max_k is not None:
             similar_items = similar_items.head(max_k)
         similar_items = similar_items.to_dict('records')
@@ -113,31 +120,53 @@ def index():
     section = request.args.get('section')
     on_sale = request.args.get("on_sale", default=False, type=bool)
     brand = request.args.get('brand')
+    list_ids = request.args.get('ids')
+    # list_ids = request.args.get('ids', type=list)
+    print(list_ids)
     
-    if all([i is None for i in [query, section, on_sale, brand]]):
-        make_response(jsonify({'error': 'Missing text parameter'}), 400)
-    
-    
+    if all([i is None for i in [query, section, on_sale, brand, list_ids]]):
+        make_response(jsonify({'error': 'Missing parameter'}), 400)
+
     else:
         results = []
         if query is not None:
             query_results = retrieve_most_similar_images(query)
-            
             for item in query_results:
                 results.append(item)
         if section is not None:
-            filtered = images_df[images_df['section']==section].to_dict('records')
+            filtered = images_df[images_df['section']==section].reset_index().to_dict('records')
             for item in filtered:
                 results.append(item)
         if brand is not None:
-            filtered = images_df[images_df['brand']==brand].to_dict('records')
+            filtered = images_df[images_df['brand']==brand].reset_index().to_dict('records')
             for item in filtered:
                 results.append(item)
         if on_sale is not False:
-            print(on_sale)
-            filtered = images_df[images_df['sale']==on_sale].to_dict('records')
+            filtered = images_df[images_df['sale']==on_sale].reset_index().to_dict('records')
             for item in filtered:
                 results.append(item)
+        if list_ids is not None:
+            list_ids = list_ids.replace("'", "").split(',')
+            print(list_ids)
+            list_img_url = images_df[images_df['id'].isin(list_ids)].index.tolist()
+            if len(list_img_url)>0:
+                for idx_ in list_img_url:
+                    print(idx_)
+                    item_data = {}
+                    item_data['id'] = images_df.loc[idx_]['id']
+                    item_data['brand'] = images_df.loc[idx_]['brand']
+                    item_data['name'] = images_df.loc[idx_].get('name')
+                    item_data['section'] = images_df.loc[idx_].get('section')
+                    item_data['img_url'] = idx_
+                    item_data['price'] = images_df.loc[idx_].get('price')
+                    item_data['price_float'] = images_df.loc[idx_].get('price_float')
+                    item_data['old_price'] = images_df.loc[idx_].get('old_price')
+                    item_data['old_price_float'] = images_df.loc[idx_].get('old_price_float')
+                    item_data['discount_rate'] = images_df.loc[idx_].get('discount_rate')
+                    item_data['sale'] = bool(images_df.loc[idx_].get('sale'))
+                    item_data['shop_link'] = images_df.loc[idx_].get('shop_link')
+                    print(item_data)
+                    results.append(item_data)
 
     return jsonify(results)
 

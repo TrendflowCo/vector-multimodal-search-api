@@ -7,3 +7,17 @@ Flask==2.0.1
 pandas==1.4.1
 requests==2.28.1
 torch
+
+db-dtypes
+google-api-core
+google-api-python-client
+google-auth
+google-auth-httplib2
+google-auth-oauthlib
+google-cloud-core
+google-cloud-storage
+google-cloud-bigquery==3.3.0
+google-cloud-videointelligence==2.5.1
+google-crc32c
+google-resumable-media==2.1.0
+googleapis-common-protos==1.53.0

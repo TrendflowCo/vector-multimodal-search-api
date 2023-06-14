@@ -49,6 +49,9 @@ TABLE_ID = 'dokuso.listing_products.items_details'
 query = f"SELECT * FROM `{TABLE_ID}`"
 
 images_df = fetch_data.query_datasets_to_df(query).set_index('img_url')
+del images_df['price'], images_df['old_price']
+images_df['price_float'] = images_df['price_float'].fillna(0)
+images_df['old_price_float'] = images_df['old_price_float'].fillna(0)
 
 blacklist_img_url = images_df[images_df['shop_link'].isin(blacklist)].index.tolist()
 
@@ -101,7 +104,6 @@ def generate_texts(prompt):
     return [template.format(prompt) for template in templates]
 
 
-
 # Create a dictionary to store image data for faster lookups
 image_data_dict = {}
 for idx, row in images_df.iterrows():
@@ -111,9 +113,7 @@ for idx, row in images_df.iterrows():
         'name': row.get('name'),
         'section': row.get('section'),
         'img_url': idx,
-        'price': row.get('price'),
         'price_float': row.get('price_float'),
-        'old_price': row.get('old_price'),
         'old_price_float': row.get('old_price_float'),
         'discount_rate': row.get('discount_rate'),
         'sale': bool(row.get('sale')),
@@ -138,36 +138,8 @@ def compute_similarity(e_img_cat, e_text_cat, max_k, threshold, blacklist_img_ur
         similarity_max = similarity[:, idx].max().item()
         item_data['similarity'] = similarity_max
         similar_items.append(item_data)
-        
-#     similar_items = []
-
-#     for idx in top_idx:
-#         idx = idx.item()
-#         idx_ = e_img_df.index[idx]
-#         if idx_ not in blacklist_img_url:
-#             item_data = create_item_data(idx_)
-#             item_data['similarity'] = similarity[:, idx].max().item()
-#             similar_items.append(item_data)
 
     return similar_items
-
-
-# def create_item_data(idx):
-#     item_data = {
-#         'id': images_df.loc[idx]['id'],
-#         'brand': images_df.loc[idx]['brand'],
-#         'name': images_df.loc[idx].get('name'),
-#         'section': images_df.loc[idx].get('section'),
-#         'img_url': idx,
-#         'price': images_df.loc[idx].get('price'),
-#         'price_float': images_df.loc[idx].get('price_float'),
-#         'old_price': images_df.loc[idx].get('old_price'),
-#         'old_price_float': images_df.loc[idx].get('old_price_float'),
-#         'discount_rate': images_df.loc[idx].get('discount_rate'),
-#         'sale': bool(images_df.loc[idx].get('sale')),
-#         'shop_link': images_df.loc[idx].get('shop_link')
-#     }
-#     return item_data
 
 
 def retrieve_most_similar_images(prompt, max_k=None, threshold=0.2):
@@ -202,32 +174,38 @@ def handle_section_results(section, results):
         filtered = images_df[images_df['section'] == section].reset_index().to_dict('records')
         results.extend(filtered)
 
+def handle_price_range_results(min_price, max_price, results):
+    if (min_price is not None) and (max_price is not None):
+        filtered = images_df[(images_df['price_float'] >= min_price) & (images_df['price_float'] <= max_price)].reset_index().to_dict('records')
+        results.extend(filtered)
+    elif (min_price is not None):
+        filtered = images_df[(images_df['price_float'] >= min_price)].reset_index().to_dict('records')
+        results.extend(filtered)
+    elif (max_price is not None):
+        filtered = images_df[(images_df['price_float'] <= max_price)].reset_index().to_dict('records')
+        results.extend(filtered)
+    else:
+        pass
+        
 def handle_brand_results(brand, results):
     if brand is not None:
         filtered = images_df[images_df['brand'] == brand].reset_index().to_dict('records')
         results.extend(filtered)
 
+
 def handle_on_sale_results(on_sale, results):
     if on_sale is not False:
         filtered = images_df[images_df['sale'] == on_sale].reset_index().to_dict('records')
         results.extend(filtered)
-
-# def handle_list_ids_results(list_ids, results):
-#     if list_ids is not None:
-#         list_ids = list_ids.replace("'", "").split(',')
-#         list_img_url = images_df[images_df['id'].isin(list_ids)].index.tolist()
-#         for idx_ in list_img_url:
-#             item_data = {}
-#             # Construct item_data
-#             results.append(item_data) 
         
-def handle_list_ids_results(list_ids, images_df):
-    results = []
+        
+def handle_list_ids_results(list_ids, images_df, results):
     if list_ids is not None:
         list_ids = list_ids.replace("'", "").split(',')
-        filtered_items = images_df[images_df['id'].isin(list_ids)]
-        results = filtered_items.apply(create_item_data, axis=1).tolist()
-    return results
+        print('list_ids', list_ids)
+        filtered_items = images_df[images_df['id'].isin(list_ids)].reset_index().to_dict('records')
+        # results = filtered_items.apply(create_item_data, axis=1).tolist()
+        results.extend(filtered_items)
 
 def paginate_results(results, page, limit):
     total_results = len(results)
@@ -238,11 +216,14 @@ def paginate_results(results, page, limit):
     
     return total_results, total_pages, paginated_results
 
+
 @app.route("/api/v1/search", methods=["GET"])
 @cache.cached()
 def index():
     query = request.args.get('query')
-    threshold = request.args.get('threshold', default=0.25, type=float)
+    threshold = request.args.get('threshold', default=0.21, type=float)
+    max_price = request.args.get('max_price', type=int)
+    min_price = request.args.get('min_price', type=int)
     section = request.args.get('section')
     on_sale = request.args.get("on_sale", default=False, type=bool)
     brand = request.args.get('brand')
@@ -255,11 +236,12 @@ def index():
         return make_response(jsonify({'error': 'Missing parameter'}), 400)
 
     results = []
+    handle_list_ids_results(list_ids, images_df, results)
     handle_query_results(query, threshold, language, results)
     handle_section_results(section, results)
+    handle_price_range_results(min_price, max_price, results)
     handle_brand_results(brand, results)
     handle_on_sale_results(on_sale, results)
-    handle_list_ids_results(list_ids, results)
 
 
     total_results, total_pages, paginated_results = paginate_results(results, page, limit)

@@ -49,9 +49,9 @@ TABLE_ID = 'dokuso.listing_products.items_details'
 query = f"SELECT * FROM `{TABLE_ID}`"
 
 images_df = fetch_data.query_datasets_to_df(query).set_index('img_url')
-del images_df['price'], images_df['old_price']
-images_df['price_float'] = images_df['price_float'].fillna(0)
-images_df['old_price_float'] = images_df['old_price_float'].fillna(0)
+images_df['price'] = images_df['price_float'].fillna(0)
+images_df['old_price'] = images_df['old_price_float'].fillna(0)
+del images_df['price_float'], images_df['old_price_float']
 
 blacklist_img_url = images_df[images_df['shop_link'].isin(blacklist)].index.tolist()
 
@@ -75,6 +75,21 @@ templates = [
     '{} inspiration.'
 ]
 
+# Create a dictionary to store image data for faster lookups
+image_data_dict = {}
+for idx, row in images_df.iterrows():
+    image_data_dict[idx] = {
+        'id': row['id'],
+        'brand': row['brand'],
+        'name': row.get('name'),
+        'section': row.get('section'),
+        'img_url': idx,
+        'price': row.get('price'),
+        'old_price': row.get('old_price'),
+        'discount_rate': row.get('discount_rate'),
+        'sale': bool(row.get('sale')),
+        'shop_link': row.get('shop_link')
+    }
 
 @memory.cache
 def compute_text_embeddings(text):
@@ -104,22 +119,6 @@ def generate_texts(prompt):
     return [template.format(prompt) for template in templates]
 
 
-# Create a dictionary to store image data for faster lookups
-image_data_dict = {}
-for idx, row in images_df.iterrows():
-    image_data_dict[idx] = {
-        'id': row['id'],
-        'brand': row['brand'],
-        'name': row.get('name'),
-        'section': row.get('section'),
-        'img_url': idx,
-        'price_float': row.get('price_float'),
-        'old_price_float': row.get('old_price_float'),
-        'discount_rate': row.get('discount_rate'),
-        'sale': bool(row.get('sale')),
-        'shop_link': row.get('shop_link')
-    }
-    
 def compute_similarity(e_img_cat, e_text_cat, max_k, threshold, blacklist_img_url):
     similarity = get_similarity(e_img_cat, e_text_cat)
     if max_k is not None:
@@ -141,71 +140,56 @@ def compute_similarity(e_img_cat, e_text_cat, max_k, threshold, blacklist_img_ur
 
     return similar_items
 
+def create_item_data(row):
+    return {
+        'id': row['id'],
+        'brand': row['brand'],
+        'name': row.get('name'),
+        'section': row.get('section'),
+        'img_url': row.get('img_url'),
+        'price': row.get('price'),
+        'old_price': row.get('old_price'),
+        'discount_rate': row.get('discount_rate'),
+        'sale': bool(row.get('sale')),
+        'shop_link': row.get('shop_link')
+    }
 
-def retrieve_most_similar_images(prompt, max_k=None, threshold=0.2):
-    prompt = clean_prompt_text(prompt)
-    texts = generate_texts(prompt)
-    e_text_cat = torch.cat([compute_text_embeddings(t) for t in texts]).to('cpu')
-    similar_items = compute_similarity(e_img_cat, e_text_cat, max_k, threshold, blacklist_img_url)
+def retrieve_filtered_images(images_df, filters, language):
+    filtered_items = images_df.copy()
 
-    if len(similar_items) > 0:
-        similar_items = pd.DataFrame(similar_items)
-        similar_items = similar_items.sort_values(by='similarity', ascending=False)
-        similar_items = similar_items.drop_duplicates(subset=['img_url'], keep='first')
-        if max_k is not None:
-            similar_items = similar_items.head(max_k)
-        similar_items = similar_items.to_dict('records')
-
-    return similar_items
-
-def handle_query_results(query, threshold, language, results):
-    if query is not None:
-        if (language is not None) and (language != 'en'):
+    if 'query' in filters:
+        query = filters['query']
+        threshold = filters.get('threshold', 0.21)
+        if language != 'en':
             print(f"Translation from {language} to en: \n")
             print(f"Original: {query}\n")
             query = translate(query, language)
             print(f"English: {query}")
+        query = clean_prompt_text(query)
+        texts = generate_texts(query)
+        e_text_cat = torch.cat([compute_text_embeddings(t) for t in texts]).to('cpu')
+        similar_items = compute_similarity(e_img_cat, e_text_cat, max_k=None, threshold=threshold, blacklist_img_url=None)
+        similar_items_df = pd.DataFrame(similar_items).set_index('img_url')
+        filtered_items = filtered_items[filtered_items.index.isin(similar_items_df.index)]
 
-        query_results = retrieve_most_similar_images(query, threshold=threshold)
-        results.extend(query_results)
+    if filters.get('section'):
+        filtered_items = filtered_items[filtered_items['section'] == filters['section']]
+    if filters.get('min_price'):
+        filtered_items = filtered_items[filtered_items['price'] >= filters['min_price']]
+    if filters.get('max_price'):
+        filtered_items = filtered_items[filtered_items['price'] <= filters['max_price']]
+    if filters.get('brands'):
+        list_brands = filters['brands'].replace("'", "").split(',')
+        filtered_items = filtered_items[filtered_items['brand'].isin(list_brands)]
+    if filters.get('on_sale'):
+        filtered_items = filtered_items[filtered_items['sale'] == filters['on_sale']]
+    if filters.get('ids'):
+        list_ids = filters['ids'].replace("'", "").split(',')
+        filtered_items = filtered_items[filtered_items['id'].isin(list_ids)]
 
-def handle_section_results(section, results):
-    if section is not None:
-        filtered = images_df[images_df['section'] == section].reset_index().to_dict('records')
-        results.extend(filtered)
+    filtered_items.reset_index(inplace=True)
+    return filtered_items
 
-def handle_price_range_results(min_price, max_price, results):
-    if (min_price is not None) and (max_price is not None):
-        filtered = images_df[(images_df['price_float'] >= min_price) & (images_df['price_float'] <= max_price)].reset_index().to_dict('records')
-        results.extend(filtered)
-    elif (min_price is not None):
-        filtered = images_df[(images_df['price_float'] >= min_price)].reset_index().to_dict('records')
-        results.extend(filtered)
-    elif (max_price is not None):
-        filtered = images_df[(images_df['price_float'] <= max_price)].reset_index().to_dict('records')
-        results.extend(filtered)
-    else:
-        pass
-        
-def handle_brand_results(brand, results):
-    if brand is not None:
-        filtered = images_df[images_df['brand'] == brand].reset_index().to_dict('records')
-        results.extend(filtered)
-
-
-def handle_on_sale_results(on_sale, results):
-    if on_sale is not False:
-        filtered = images_df[images_df['sale'] == on_sale].reset_index().to_dict('records')
-        results.extend(filtered)
-        
-        
-def handle_list_ids_results(list_ids, images_df, results):
-    if list_ids is not None:
-        list_ids = list_ids.replace("'", "").split(',')
-        print('list_ids', list_ids)
-        filtered_items = images_df[images_df['id'].isin(list_ids)].reset_index().to_dict('records')
-        # results = filtered_items.apply(create_item_data, axis=1).tolist()
-        results.extend(filtered_items)
 
 def paginate_results(results, page, limit):
     total_results = len(results)
@@ -213,7 +197,7 @@ def paginate_results(results, page, limit):
     start_index = (page - 1) * limit
     end_index = start_index + limit
     paginated_results = results[start_index:end_index]
-    
+
     return total_results, total_pages, paginated_results
 
 
@@ -222,27 +206,43 @@ def paginate_results(results, page, limit):
 def index():
     query = request.args.get('query')
     threshold = request.args.get('threshold', default=0.21, type=float)
-    max_price = request.args.get('max_price', type=int)
-    min_price = request.args.get('min_price', type=int)
+    max_price = request.args.get('maxPrice', type=int)
+    min_price = request.args.get('minPrice', type=int)
     section = request.args.get('section')
-    on_sale = request.args.get("on_sale", default=False, type=bool)
-    brand = request.args.get('brand')
+    on_sale = request.args.get("onSale", default=False, type=bool)
+    brands = request.args.get('brands')
     list_ids = request.args.get('ids')
-    language = request.args.get('language')
+    language = request.args.get('language', default='en')
     page = request.args.get('page', default=1, type=int)
     limit = request.args.get('limit', default=100, type=int)
+    sort_by = request.args.get('sortBy')
+    ascending = request.args.get('ascending', default=False, type=bool)
+    
 
-    if all([i is None for i in [query, section, on_sale, brand, list_ids]]):
+    if all([i is None for i in [query, section, on_sale, brands, list_ids]]):
         return make_response(jsonify({'error': 'Missing parameter'}), 400)
 
-    results = []
-    handle_list_ids_results(list_ids, images_df, results)
-    handle_query_results(query, threshold, language, results)
-    handle_section_results(section, results)
-    handle_price_range_results(min_price, max_price, results)
-    handle_brand_results(brand, results)
-    handle_on_sale_results(on_sale, results)
+    filters = {
+        'query': query,
+        'threshold': threshold,
+        'section': section,
+        'min_price': min_price,
+        'max_price': max_price,
+        'brands': brands,
+        'on_sale': on_sale,
+        'ids': list_ids
+    }
 
+    results = retrieve_filtered_images(images_df, filters, language)
+    
+    if sort_by:
+        list_sort_by = sort_by.replace("'", "").split(',')
+        results = results.sort_values(by=list_sort_by, ascending=ascending)
+        
+        
+    results = results.apply(create_item_data, axis=1)
+        
+    results = results.tolist()
 
     total_results, total_pages, paginated_results = paginate_results(results, page, limit)
 
@@ -253,6 +253,7 @@ def index():
         'total_results': total_results,
         'total_pages': total_pages
     })
+       
 
 
 if __name__ == "__main__":

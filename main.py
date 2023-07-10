@@ -12,7 +12,7 @@ import fetch_data
 from utils import translate
 from joblib import Memory
 import functools
-
+import faiss
 
 # Create a cache for storing text embeddings
 cache_dir = './cache'
@@ -49,22 +49,34 @@ TABLE_ID = 'dokuso.listing_products.items_details'
 query = f"SELECT * FROM `{TABLE_ID}`"
 
 images_df = fetch_data.query_datasets_to_df(query).set_index('img_url')
-images_df['price'] = images_df['price_float'].fillna(0)
-images_df['old_price'] = images_df['old_price_float'].fillna(0)
-del images_df['price_float'], images_df['old_price_float']
+images_df['price_float'] = images_df['price_float'].fillna(0)
+images_df['old_price_float'] = images_df['old_price_float'].fillna(0)
+images_df['discount_rate'] = images_df['discount_rate'].fillna(0)
+images_df.loc[images_df['price']=='N/A', 'price'] = '0 $'
+images_df.loc[images_df['old_price']=='N/A', 'old_price'] = '0 $'
+# del images_df['price_float'], images_df['old_price_float']
 
 blacklist_img_url = images_df[images_df['shop_link'].isin(blacklist)].index.tolist()
 
 with open('./data/all_images.pkl', 'rb') as f:
     # e_img = cpickle.load(f)
     e_img = CPU_Unpickler(f).load()
-    
+
 e_img = {k: v for k,v in e_img.items() if v is not None}
+list_urls = list(e_img.keys())
+
+images_df = images_df[images_df.index.isin(list_urls)]
 
 e_img_cat = torch.cat(list(e_img.values()))
 
 e_img_df = pd.DataFrame(e_img_cat, index=e_img.keys())
 
+# Prepare the embeddings for FAISS
+embeddings = np.array([embedding.numpy().flatten()for embedding in e_img.values()], dtype=np.float32)
+
+# Build an index with the embeddings
+index = faiss.IndexFlatL2(embeddings.shape[1])  # L2 distance metric
+index.add(embeddings)
 
 templates = [
     '{}.',
@@ -105,7 +117,6 @@ def get_similarity(image_features, text_features):
     text_features_normalized = F.normalize(text_features, dim=1)
     similarity = text_features_normalized @ image_features_normalized.T
     return similarity
-
 
 def clean_prompt_text(prompt):
     prompt = prompt.lower().replace('style', '')
@@ -149,6 +160,8 @@ def create_item_data(row):
         'img_url': row.get('img_url'),
         'price': row.get('price'),
         'old_price': row.get('old_price'),
+        'price_float': row.get('price_float'),
+        'old_price_float': row.get('old_price_float'),
         'discount_rate': row.get('discount_rate'),
         'sale': bool(row.get('sale')),
         'shop_link': row.get('shop_link')
@@ -157,7 +170,7 @@ def create_item_data(row):
 def retrieve_filtered_images(images_df, filters, language):
     filtered_items = images_df.copy()
 
-    if 'query' in filters:
+    if filters.get('query'):
         query = filters['query']
         threshold = filters.get('threshold', 0.21)
         if language != 'en':
@@ -170,17 +183,18 @@ def retrieve_filtered_images(images_df, filters, language):
         e_text_cat = torch.cat([compute_text_embeddings(t) for t in texts]).to('cpu')
         similar_items = compute_similarity(e_img_cat, e_text_cat, max_k=None, threshold=threshold, blacklist_img_url=None)
         similar_items_df = pd.DataFrame(similar_items).set_index('img_url')
-        filtered_items = filtered_items[filtered_items.index.isin(similar_items_df.index)]
+        similar_items_df = similar_items_df.sort_values(by='similarity', ascending=False)
+        filtered_items = filtered_items.loc[similar_items_df.index]
 
     if filters.get('section'):
         filtered_items = filtered_items[filtered_items['section'] == filters['section']]
     if filters.get('min_price'):
-        filtered_items = filtered_items[filtered_items['price'] >= filters['min_price']]
+        filtered_items = filtered_items[filtered_items['price_float'] >= filters['min_price']]
     if filters.get('max_price'):
-        filtered_items = filtered_items[filtered_items['price'] <= filters['max_price']]
+        filtered_items = filtered_items[filtered_items['price_float'] <= filters['max_price']]
     if filters.get('brands'):
-        list_brands = filters['brands'].replace("'", "").split(',')
-        filtered_items = filtered_items[filtered_items['brand'].isin(list_brands)]
+        list_brands = [x.lower() for x in filters['brands'].replace("'", "").split(',')]
+        filtered_items = filtered_items[filtered_items['brand'].str.lower().isin(list_brands)]
     if filters.get('on_sale'):
         filtered_items = filtered_items[filtered_items['sale'] == filters['on_sale']]
     if filters.get('ids'):
@@ -190,6 +204,41 @@ def retrieve_filtered_images(images_df, filters, language):
     filtered_items.reset_index(inplace=True)
     return filtered_items
 
+def similarity_search(input_id, k):
+    
+    input_index = images_df[images_df['id'] == input_id].index
+
+    if len(input_index)==0:
+        return None
+    
+    input_img_url = input_index[0]
+        
+    input_shop_link =  images_df.loc[input_img_url]['shop_link']
+    
+    input_embedding = e_img[input_img_url].numpy().flatten()
+    
+    _, indices = index.search(np.array([input_embedding], dtype=np.float32), k + 1)
+
+    similar_images = []
+    shop_link_similarities = {}
+    for i, idx in enumerate(indices[0][1:]):
+        img_url = list_urls[idx]
+        row = images_df.loc[img_url]
+        row['img_url'] = img_url
+        shop_link = row['shop_link']
+        if shop_link == input_shop_link:
+            continue
+        similarity_score = 1 - i / k
+        
+        if shop_link in shop_link_similarities:
+            if similarity_score > shop_link_similarities[shop_link]:
+                shop_link_similarities[shop_link] = similarity_score
+                similar_images.append(create_item_data(row))
+        else:
+  
+            similar_images.append(create_item_data(row))
+    
+    return similar_images
 
 def paginate_results(results, page, limit):
     total_results = len(results)
@@ -203,9 +252,9 @@ def paginate_results(results, page, limit):
 
 @app.route("/api/v1/search", methods=["GET"])
 @cache.cached()
-def index():
+def get_search_endpoint():
     query = request.args.get('query')
-    threshold = request.args.get('threshold', default=0.21, type=float)
+    threshold = request.args.get('threshold', default=0.23, type=float)
     max_price = request.args.get('maxPrice', type=int)
     min_price = request.args.get('minPrice', type=int)
     section = request.args.get('section')
@@ -239,6 +288,11 @@ def index():
         list_sort_by = sort_by.replace("'", "").split(',')
         results = results.sort_values(by=list_sort_by, ascending=ascending)
         
+    available_brands, min_overall_price, max_overall_price = '', 0, 0
+    if (results is not None) or (len(results)>0):
+        available_brands = results['brand'].unique().tolist()
+        min_overall_price = results['price_float'].min()
+        max_overall_price = results['price_float'].max()
         
     results = results.apply(create_item_data, axis=1)
         
@@ -251,10 +305,32 @@ def index():
         'page': page,
         'limit': limit,
         'total_results': total_results,
-        'total_pages': total_pages
+        'total_pages': total_pages,
+        'metadata': {'brands': available_brands, 
+                     'min_price': min_overall_price,
+                     'max_price': max_overall_price}
     })
        
 
+@app.route("/api/v1/similarity", methods=["GET"])
+@cache.cached()
+def get_similarity_endpoint():
+    id = request.args.get('id', type=str)
+    top_k = request.args.get('threshold', default=20, type=int)
+    
+
+    if all([i is None for i in [id, top_k]]):
+        return make_response(jsonify({'error': 'Missing parameter'}), 400)
+
+    results = similarity_search(id, top_k)
+    
+    if not results:
+        return make_response(jsonify({'error': 'Id not found'}), 400)
+        
+    return jsonify({
+        'results': results
+    })
+       
 
 if __name__ == "__main__":
     app.run(debug=True)

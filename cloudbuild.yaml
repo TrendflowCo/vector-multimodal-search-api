@@ -10,9 +10,9 @@ steps:
   entrypoint: gcloud
   args: ['run', 'deploy', 'clipfashion', 
         '--image', 'gcr.io/deeplogo/clipfashion', 
-        '--region', 'us-east1', 
-        '--cpu', '4',
-        '--memory', '16Gi']
+        '--region', 'us-central1', 
+        '--cpu', '8',
+        '--memory', '32Gi']
 images:
 - gcr.io/deeplogo/clipfashion
 timeout: '3600s'

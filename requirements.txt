@@ -8,9 +8,10 @@ cloudpickle==1.6.0
 Flask==2.0.1
 pandas==1.4.1
 requests==2.28.1
-torch
+torch==2.0.1
 joblib
 Flask-Caching
+faiss-cpu==1.7.4
 
 db-dtypes
 google-api-core

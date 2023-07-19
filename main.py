@@ -9,10 +9,12 @@ from flask import Flask, jsonify, request, make_response
 from flask_caching import Cache
 from flask_cors import CORS
 import fetch_data
-from utils import translate
+from utils import *
 from joblib import Memory
 import functools
 import faiss
+#import ssl
+#ssl._create_default_https_context = ssl._create_unverified_context
 
 # Create a cache for storing text embeddings
 cache_dir = './cache'
@@ -69,7 +71,7 @@ images_df = images_df[images_df.index.isin(list_urls)]
 
 e_img_cat = torch.cat(list(e_img.values()))
 
-e_img_df = pd.DataFrame(e_img_cat, index=e_img.keys())
+e_img_df = pd.DataFrame([], index=e_img.keys())
 
 # Prepare the embeddings for FAISS
 embeddings = np.array([embedding.numpy().flatten()for embedding in e_img.values()], dtype=np.float32)
@@ -79,12 +81,13 @@ index = faiss.IndexFlatL2(embeddings.shape[1])  # L2 distance metric
 index.add(embeddings)
 
 templates = [
-    '{}.',
-    # 'a photo of a {}.',
-    'a person wearing {}.',
-    '{} style.',
-    '{} fashion.',
-    '{} inspiration.'
+    '{}',
+    'a photo of a {}',
+    'a photo of a {} product',
+    'a person wearing {}',
+    '{} style',
+    '{} fashion',
+    '{} inspiration'
 ]
 
 # Create a dictionary to store image data for faster lookups
@@ -130,7 +133,16 @@ def generate_texts(prompt):
     return [template.format(prompt) for template in templates]
 
 
-def compute_similarity(e_img_cat, e_text_cat, max_k, threshold, blacklist_img_url):
+def get_image_query_similarity_search(query, img_url):
+    texts = generate_texts(query)
+    e_text_cat = torch.cat([compute_text_embeddings(t) for t in texts]).to('cpu')
+    similarity_score = get_similarity(e_img[img_url], e_text_cat).max().item()
+    return similarity_score
+
+def compute_similarities(e_img_cat, query, max_k, threshold, blacklist_img_url):
+    query = clean_prompt_text(query)
+    texts = generate_texts(query)
+    e_text_cat = torch.cat([compute_text_embeddings(t) for t in texts]).to('cpu')
     similarity = get_similarity(e_img_cat, e_text_cat)
     if max_k is not None:
         top_idx = np.array(list(set(similarity.topk(max_k).indices.ravel().tolist())))
@@ -178,10 +190,7 @@ def retrieve_filtered_images(images_df, filters, language):
             print(f"Original: {query}\n")
             query = translate(query, language)
             print(f"English: {query}")
-        query = clean_prompt_text(query)
-        texts = generate_texts(query)
-        e_text_cat = torch.cat([compute_text_embeddings(t) for t in texts]).to('cpu')
-        similar_items = compute_similarity(e_img_cat, e_text_cat, max_k=None, threshold=threshold, blacklist_img_url=None)
+        similar_items = compute_similarities(e_img_cat, query, max_k=None, threshold=threshold, blacklist_img_url=None)
         similar_items_df = pd.DataFrame(similar_items).set_index('img_url')
         similar_items_df = similar_items_df.sort_values(by='similarity', ascending=False)
         filtered_items = filtered_items.loc[similar_items_df.index]
@@ -204,7 +213,7 @@ def retrieve_filtered_images(images_df, filters, language):
     filtered_items.reset_index(inplace=True)
     return filtered_items
 
-def similarity_search(input_id, k):
+def retrieve_most_similar_items(input_id, k):
     
     input_index = images_df[images_df['id'] == input_id].index
 
@@ -314,15 +323,14 @@ def get_search_endpoint():
 
 @app.route("/api/v1/similarity", methods=["GET"])
 @cache.cached()
-def get_similarity_endpoint():
+def retrieve_most_similar_items_endpoint():
     id = request.args.get('id', type=str)
-    top_k = request.args.get('threshold', default=20, type=int)
-    
+    query = request.args.get('query')
 
     if all([i is None for i in [id, top_k]]):
         return make_response(jsonify({'error': 'Missing parameter'}), 400)
 
-    results = similarity_search(id, top_k)
+    results = retrieve_most_similar_items(id, top_k)
     
     if not results:
         return make_response(jsonify({'error': 'Id not found'}), 400)
@@ -330,7 +338,25 @@ def get_similarity_endpoint():
     return jsonify({
         'results': results
     })
-       
 
+@app.route("/api/v1/image_query_similarity", methods=["GET"])
+@cache.cached()
+def get_item_query_similarity_endpoint():
+    query = request.args.get('id', type=str)
+    img_url = request.args.get('img_url', type=str)
+    
+
+    if all([i is None for i in [id, top_k]]):
+        return make_response(jsonify({'error': 'Missing parameter'}), 400)
+
+    score = get_image_query_similarity_search(query, img_url)
+    
+    if not results:
+        return make_response(jsonify({'error': 'Id not found'}), 400)
+       
+    return jsonify({
+        'similarity_score': score
+    })
+    
 if __name__ == "__main__":
     app.run(debug=True)

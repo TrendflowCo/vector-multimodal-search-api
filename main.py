@@ -134,10 +134,13 @@ def generate_texts(prompt):
 
 
 def get_image_query_similarity_search(query, img_url):
-    texts = generate_texts(query)
-    e_text_cat = torch.cat([compute_text_embeddings(t) for t in texts]).to('cpu')
-    similarity_score = get_similarity(e_img[img_url], e_text_cat).max().item()
-    return similarity_score
+    try:
+        texts = generate_texts(query)
+        e_text_cat = torch.cat([compute_text_embeddings(t) for t in texts]).to('cpu')
+        similarity_score = get_similarity(e_img[img_url], e_text_cat).max().item()
+        return similarity_score, None
+    except Exception as e:
+        return None, str(e)
 
 def compute_similarities(e_img_cat, query, max_k, threshold, blacklist_img_url):
     query = clean_prompt_text(query)
@@ -325,7 +328,7 @@ def get_search_endpoint():
 @cache.cached()
 def retrieve_most_similar_items_endpoint():
     id = request.args.get('id', type=str)
-    query = request.args.get('query')
+    top_k = request.args.get('threshold', default=20, type=int)
 
     if all([i is None for i in [id, top_k]]):
         return make_response(jsonify({'error': 'Missing parameter'}), 400)
@@ -346,13 +349,13 @@ def get_item_query_similarity_endpoint():
     img_url = request.args.get('img_url', type=str)
     
 
-    if all([i is None for i in [id, top_k]]):
+    if all([i is None for i in [query, img_url]]):
         return make_response(jsonify({'error': 'Missing parameter'}), 400)
 
-    score = get_image_query_similarity_search(query, img_url)
+    score, e = get_image_query_similarity_search(query, img_url)
     
-    if not results:
-        return make_response(jsonify({'error': 'Id not found'}), 400)
+    if not score:
+        return make_response(jsonify({'error': f"{e}"}), 400)
        
     return jsonify({
         'similarity_score': score

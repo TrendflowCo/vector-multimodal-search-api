@@ -81,13 +81,31 @@ index = faiss.IndexFlatL2(embeddings.shape[1])  # L2 distance metric
 index.add(embeddings)
 
 templates = [
-    '{}',
+    # '{}',
+    # 'a {} product',
+    # 'a {} inspired product',
+    # 'a person wearing a {}',
+    # 'a person wearing a {} inspired product',
+    # 'a person wearing a {} inspired outfit',
+    # 'a person wearing a {} style product',
+    # 'a person wearing a {} style outfit',
     'a photo of a {}',
     'a photo of a {} product',
-    'a person wearing {}',
-    '{} style',
-    '{} fashion',
-    '{} inspiration'
+    'a photo of a {} inspired product',
+    'a photo of a person wearing a {}',
+    'a photo of a person wearing a {} inspired product',
+    'a photo of a person wearing a {} style product',
+    'a photo of a person wearing a {} inspired outfit',
+    'a photo of a person wearing a {} style outfit',
+    # '{} style',
+    # '{} fashion',
+    # '{} inspired',
+]
+
+templates_tags = [
+    '{}',
+    'a photo of a {}',
+    'a photo of a person wearing a {}'
 ]
 
 # Create a dictionary to store image data for faster lookups
@@ -129,13 +147,13 @@ def clean_prompt_text(prompt):
     return prompt
 
 
-def generate_texts(prompt):
+def generate_texts(prompt, templates):
     return [template.format(prompt) for template in templates]
 
 
 def get_image_query_similarity_search(query, img_url):
     try:
-        texts = generate_texts(query)
+        texts = generate_texts(query, templates_tags)
         e_text_cat = torch.cat([compute_text_embeddings(t) for t in texts]).to('cpu')
         similarity_score = get_similarity(e_img[img_url], e_text_cat).max().item()
         return similarity_score, None
@@ -143,8 +161,7 @@ def get_image_query_similarity_search(query, img_url):
         return None, str(e)
 
 def compute_similarities(e_img_cat, query, max_k, threshold, blacklist_img_url):
-    query = clean_prompt_text(query)
-    texts = generate_texts(query)
+    texts = generate_texts(query, templates)
     e_text_cat = torch.cat([compute_text_embeddings(t) for t in texts]).to('cpu')
     similarity = get_similarity(e_img_cat, e_text_cat)
     if max_k is not None:
@@ -324,7 +341,7 @@ def get_search_endpoint():
     })
        
 
-@app.route("/api/v1/similarity", methods=["GET"])
+@app.route("/api/v1/most_similar_items", methods=["GET"])
 @cache.cached()
 def retrieve_most_similar_items_endpoint():
     id = request.args.get('id', type=str)
@@ -344,8 +361,8 @@ def retrieve_most_similar_items_endpoint():
 
 @app.route("/api/v1/image_query_similarity", methods=["GET"])
 @cache.cached()
-def get_item_query_similarity_endpoint():
-    query = request.args.get('id', type=str)
+def get_image_query_similarity_endpoint():
+    query = request.args.get('query', type=str)
     img_url = request.args.get('img_url', type=str)
     
 

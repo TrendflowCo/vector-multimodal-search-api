@@ -13,6 +13,8 @@ from utils import *
 from joblib import Memory
 import functools
 import faiss
+from collections import defaultdict
+
 #import ssl
 #ssl._create_default_https_context = ssl._create_unverified_context
 
@@ -63,6 +65,10 @@ blacklist_img_url = images_df[images_df['shop_link'].isin(blacklist)].index.toli
 with open('./data/all_images.pkl', 'rb') as f:
     # e_img = cpickle.load(f)
     e_img = CPU_Unpickler(f).load()
+
+
+with open('./data/tags_embeddings.pkl', 'rb') as f:
+    e_tags = CPU_Unpickler(f).load()
 
 e_img = {k: v for k,v in e_img.items() if v is not None}
 list_urls = list(e_img.keys())
@@ -279,6 +285,48 @@ def paginate_results(results, page, limit):
     return total_results, total_pages, paginated_results
 
 
+def get_image_tags_similarity(img_url):
+
+    results = {}
+
+    for category in e_tags:
+        tag_similarities = []
+        for tag in e_tags[category]:
+            score = get_similarity(e_img[img_url], e_tags[category][tag]).item()
+            if score is not None:
+                tag_similarities.append(score)
+
+        if tag_similarities:
+            tag_similarity_df = pd.DataFrame({'similarity': tag_similarities}, e_tags[category])
+            results[category] = tag_similarity_df.T.to_dict()
+            
+    return results
+            
+
+def get_image_top_tags(img_url):
+
+    top_tags = {}
+
+    results = get_image_tags_similarity(img_url)
+
+    for category in results:
+        for tag in results[category]:
+            d = results[category][tag]
+            d['category'] = category
+            top_tags[tag] = d
+
+    top_tags_df = pd.DataFrame(top_tags).T
+    p = top_tags_df.groupby('category')['similarity'].rank(pct=True)
+    p.name = 'percentil'
+    top_tags_df = top_tags_df.join(p)
+    top_tags_df = top_tags_df.reset_index().rename(columns={'index': 'tag'})
+    top_tags_df['score'] = top_tags_df['similarity']*top_tags_df['percentil']
+    top_tags_df[top_tags_df['score']>0.2].sort_values(by='score', ascending=False)
+
+    top_tags_dict = top_tags_df[top_tags_df['score']>0.2].sort_values(by='score', ascending=False).groupby('category')['tag'].agg(list).to_dict()
+    
+    return top_tags_dict
+    
 @app.route("/api/v1/search", methods=["GET"])
 @cache.cached()
 def get_search_endpoint():
@@ -377,6 +425,35 @@ def get_image_query_similarity_endpoint():
     return jsonify({
         'similarity_score': score
     })
+
+@app.route("/api/v1/image_tags_similarity", methods=["GET"])
+@cache.cached()
+def get_image_tags_similarity_endpoint():
+
+    img_url = request.args.get('img_url', type=str)
+
+    if img_url is None:
+        return make_response(jsonify({'error': 'Missing parameter'}), 400)
+
+    results = get_image_tags_similarity(img_url)
     
+    return jsonify({
+        'tags': results
+    })
+    
+@app.route("/api/v1/image_top_tags", methods=["GET"])
+@cache.cached()
+def get_image_top_tags_endpoint():
+
+    img_url = request.args.get('img_url', type=str)
+
+    if img_url is None:
+        return make_response(jsonify({'error': 'Missing parameter'}), 400)
+
+    results = get_image_top_tags(img_url)
+    
+    return jsonify({
+        'tags': results
+    })
 if __name__ == "__main__":
     app.run(debug=True)

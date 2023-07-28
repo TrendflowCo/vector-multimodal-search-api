@@ -5,15 +5,17 @@ import pandas as pd
 import torch
 import torch.nn.functional as F
 import clip
+from transformers import CLIPProcessor, CLIPModel,AutoTokenizer
 from flask import Flask, jsonify, request, make_response
 from flask_caching import Cache
 from flask_cors import CORS
 import fetch_data
-from utils import *
 from joblib import Memory
 import functools
 import faiss
-from collections import defaultdict
+from utils import *
+from gcp_utils import *
+from templates import templates
 
 #import ssl
 #ssl._create_default_https_context = ssl._create_unverified_context
@@ -31,15 +33,20 @@ app.config['CACHE_TYPE'] = 'SimpleCache'
 # app.config['CACHE_DIR'] = './app_cache'
 app.config['CACHE_DEFAULT_TIMEOUT'] = 3600*24 # 5 minutes
 
+# Load the CLIP model
 model, preprocess = clip.load("ViT-L/14@336px")
 model.cpu().eval()
 input_resolution = model.visual.input_resolution
 context_length = model.context_length
 vocab_size = model.vocab_size
 
+# Load the Fashion-CLIP model
+model_name = "patrickjohncyh/fashion-clip"
+model = CLIPModel.from_pretrained(model_name)
+processor = CLIPProcessor.from_pretrained(model_name)
+model.cpu().eval()
 
 class CPU_Unpickler(pickle.Unpickler):
-    
     def find_class(self, module, name):
         if module == 'torch.storage' and name == '_load_from_bytes':
             return lambda b: torch.load(io.BytesIO(b), map_location='cpu')
@@ -62,13 +69,9 @@ images_df.loc[images_df['old_price']=='N/A', 'old_price'] = '0 $'
 
 blacklist_img_url = images_df[images_df['shop_link'].isin(blacklist)].index.tolist()
 
-with open('./data/all_images.pkl', 'rb') as f:
-    # e_img = cpickle.load(f)
-    e_img = CPU_Unpickler(f).load()
-
-
-with open('./data/tags_embeddings.pkl', 'rb') as f:
-    e_tags = CPU_Unpickler(f).load()
+e_img = load_data_from_blob(all_images_blob)
+e_fclip_img = load_data_from_blob(all_images_fclip_blob)
+e_tags = load_data_from_blob(tags_embeddings_blob)
 
 e_img = {k: v for k,v in e_img.items() if v is not None}
 list_urls = list(e_img.keys())
@@ -85,34 +88,6 @@ embeddings = np.array([embedding.numpy().flatten()for embedding in e_img.values(
 # Build an index with the embeddings
 index = faiss.IndexFlatL2(embeddings.shape[1])  # L2 distance metric
 index.add(embeddings)
-
-templates = [
-    # '{}',
-    # 'a {} product',
-    # 'a {} inspired product',
-    # 'a person wearing a {}',
-    # 'a person wearing a {} inspired product',
-    # 'a person wearing a {} inspired outfit',
-    # 'a person wearing a {} style product',
-    # 'a person wearing a {} style outfit',
-    'a photo of a {}',
-    'a photo of a {} product',
-    'a photo of a {} inspired product',
-    'a photo of a person wearing a {}',
-    'a photo of a person wearing a {} inspired product',
-    'a photo of a person wearing a {} style product',
-    'a photo of a person wearing a {} inspired outfit',
-    'a photo of a person wearing a {} style outfit',
-    # '{} style',
-    # '{} fashion',
-    # '{} inspired',
-]
-
-templates_tags = [
-    '{}',
-    'a photo of a {}',
-    'a photo of a person wearing a {}'
-]
 
 # Create a dictionary to store image data for faster lookups
 image_data_dict = {}
@@ -157,9 +132,10 @@ def generate_texts(prompt, templates):
     return [template.format(prompt) for template in templates]
 
 
-def get_image_query_similarity_search(query, img_url):
+def get_image_query_similarity_score(query, img_url):
     try:
-        texts = generate_texts(query, templates_tags)
+        query = clean_prompt_text(query)
+        texts = generate_texts(query, templates)
         e_text_cat = torch.cat([compute_text_embeddings(t) for t in texts]).to('cpu')
         similarity_score = get_similarity(e_img[img_url], e_text_cat).max().item()
         return similarity_score, None
@@ -292,14 +268,13 @@ def get_image_tags_similarity(img_url):
     for category in e_tags:
         tag_similarities = []
         for tag in e_tags[category]:
-            score = get_similarity(e_img[img_url], e_tags[category][tag]).item()
+            score = get_similarity(e_fclip_img[img_url], e_tags[category][tag].reshape(1,-1)).item()
             if score is not None:
                 tag_similarities.append(score)
 
         if tag_similarities:
             tag_similarity_df = pd.DataFrame({'similarity': tag_similarities}, e_tags[category])
             results[category] = tag_similarity_df.T.to_dict()
-            
     return results
             
 
@@ -326,7 +301,7 @@ def get_image_top_tags(img_url):
     top_tags_dict = top_tags_df[top_tags_df['score']>0.2].sort_values(by='score', ascending=False).groupby('category')['tag'].agg(list).to_dict()
     
     return top_tags_dict
-    
+
 @app.route("/api/v1/search", methods=["GET"])
 @cache.cached()
 def get_search_endpoint():
@@ -417,7 +392,7 @@ def get_image_query_similarity_endpoint():
     if all([i is None for i in [query, img_url]]):
         return make_response(jsonify({'error': 'Missing parameter'}), 400)
 
-    score, e = get_image_query_similarity_search(query, img_url)
+    score, e = get_image_query_similarity_score(query, img_url)
     
     if not score:
         return make_response(jsonify({'error': f"{e}"}), 400)
@@ -455,5 +430,6 @@ def get_image_top_tags_endpoint():
     return jsonify({
         'tags': results
     })
+
 if __name__ == "__main__":
     app.run(debug=True)

@@ -1,7 +1,6 @@
 auto_mix_prep==0.2.0
 gunicorn==20.1.0
 
-
 googletrans==3.1.0a0
 flask-cors==3.0.10
 cloudpickle==1.6.0
@@ -12,6 +11,7 @@ torch==2.0.1
 joblib
 Flask-Caching
 faiss-cpu==1.7.4
+transformers
 
 db-dtypes
 google-api-core

@@ -9,7 +9,6 @@ from transformers import CLIPProcessor, CLIPModel,AutoTokenizer
 from flask import Flask, jsonify, request, make_response
 from flask_caching import Cache
 from flask_cors import CORS
-import fetch_data
 from joblib import Memory
 import functools
 import faiss
@@ -59,7 +58,7 @@ TABLE_ID = 'dokuso.listing_products.items_details'
 
 query = f"SELECT * FROM `{TABLE_ID}`"
 
-images_df = fetch_data.query_datasets_to_df(query).set_index('img_url')
+images_df = query_datasets_to_df(query).set_index('img_url')
 images_df['price_float'] = images_df['price_float'].fillna(0)
 images_df['old_price_float'] = images_df['old_price_float'].fillna(0)
 images_df['discount_rate'] = images_df['discount_rate'].fillna(0)

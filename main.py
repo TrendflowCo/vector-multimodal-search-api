@@ -5,7 +5,6 @@ import pandas as pd
 import torch
 import torch.nn.functional as F
 import clip
-from transformers import CLIPProcessor, CLIPModel,AutoTokenizer
 from flask import Flask, jsonify, request, make_response
 from flask_caching import Cache
 from flask_cors import CORS
@@ -13,11 +12,9 @@ from joblib import Memory
 import functools
 import faiss
 from utils import *
-from gcp_utils import *
-from templates import templates
-
-#import ssl
-#ssl._create_default_https_context = ssl._create_unverified_context
+# from gcp_utils import *
+from fetch_data import *
+from templates import templates, templates_with_adjectives, garment_types
 
 # Create a cache for storing text embeddings
 cache_dir = './cache'
@@ -38,71 +35,101 @@ model.cpu().eval()
 input_resolution = model.visual.input_resolution
 context_length = model.context_length
 vocab_size = model.vocab_size
-
-# Load the Fashion-CLIP model
-model_name = "patrickjohncyh/fashion-clip"
-model = CLIPModel.from_pretrained(model_name)
-processor = CLIPProcessor.from_pretrained(model_name)
-model.cpu().eval()
-
-class CPU_Unpickler(pickle.Unpickler):
-    def find_class(self, module, name):
-        if module == 'torch.storage' and name == '_load_from_bytes':
-            return lambda b: torch.load(io.BytesIO(b), map_location='cpu')
-        else:
-            return super().find_class(module, name)
         
 blacklist = ['https://www.stradivarius.com/es/coletero-grande-saten-l00150411']
 
-TABLE_ID = 'dokuso.listing_products.items_details'
 
-query = f"SELECT * FROM `{TABLE_ID}`"
+query = """SELECT  
+    distinct
+    a.id, 
+    a.shop_link, 
+    a.brand, 
+    a.name,
+    a.desc_1,
+    a.desc_2,
+    a.category, 
+    a.price,
+    a.old_price, 
+    a.currency,
+    a.discount_rate, 
+    a.sale, 
+    b.img_url
+FROM `dokuso.listing_products.items` a
+LEFT JOIN `dokuso.listing_products.images` b
+    ON a.id = b.id_item
+INNER JOIN (
+    SELECT id, MAX(updated_at) as latest_update
+    FROM `dokuso.listing_products.items`
+    GROUP BY id
+) latest_items
+    ON a.id = latest_items.id AND a.updated_at = latest_items.latest_update
+WHERE b.img_url IS NOT NULL"""
 
-images_df = query_datasets_to_df(query).set_index('img_url')
-images_df['price_float'] = images_df['price_float'].fillna(0)
-images_df['old_price_float'] = images_df['old_price_float'].fillna(0)
-images_df['discount_rate'] = images_df['discount_rate'].fillna(0)
-images_df.loc[images_df['price']=='N/A', 'price'] = '0 $'
-images_df.loc[images_df['old_price']=='N/A', 'old_price'] = '0 $'
-# del images_df['price_float'], images_df['old_price_float']
+images_df = query_datasets_to_df(query).drop_duplicates(['img_url']).set_index('img_url')
+
+
+query = f"""
+SELECT
+b.img_url,
+a.features
+from `dokuso.embeddings.images` a
+left join `dokuso.listing_products.images` b
+on a.id_img = b.id
+"""
+
+e_img_clip = query_datasets_to_df(query).set_index('img_url')['features'].T.to_dict()
+
+query = f"""
+SELECT
+b.img_url,
+a.features
+from `dokuso.embeddings.images_fclip` a
+left join `dokuso.listing_products.images` b
+on a.id_img = b.id
+"""
+
+e_img_fclip = query_datasets_to_df(query).set_index('img_url')['features'].T.to_dict()
+
+query = f"""
+SELECT
+a.img_id, 
+a.category, 
+a.tags,
+b.img_url
+from `dokuso.tagging.images`a
+left join `dokuso.listing_products.images` b
+on a.img_id = b.id
+"""
+
+images_tags_df = query_datasets_to_df(query).set_index('img_url')
 
 blacklist_img_url = images_df[images_df['shop_link'].isin(blacklist)].index.tolist()
 
-e_img = load_data_from_blob(all_images_blob)
-e_fclip_img = load_data_from_blob(all_images_fclip_blob)
-e_tags = load_data_from_blob(tags_embeddings_blob)
 
-e_img = {k: v for k,v in e_img.items() if v is not None}
-list_urls = list(e_img.keys())
+# Filtering out blacklisted images
+e_img_clip = {k: torch.tensor(v).reshape(1, -1).float() for k,v in e_img_clip.items() if v is not None}
+
+list_urls = list(e_img_clip.keys())
+
+e_img_fclip = {k: torch.tensor(v) for k,v in e_img_fclip.items() if (v is not None) and (k in list_urls)}
+
+images_df['price'] = images_df['price'].fillna(0)
+images_df['old_price'] = images_df['old_price'].fillna(images_df['price'])
+images_df['discount_rate'] = images_df['discount_rate'].fillna(0)
+all_images_df = images_df.copy()
 
 images_df = images_df[images_df.index.isin(list_urls)]
 
-e_img_cat = torch.cat(list(e_img.values()))
-
-e_img_df = pd.DataFrame([], index=e_img.keys())
+e_img_clip_cat = torch.cat(list(e_img_clip.values()))
+e_img_clip_df = pd.DataFrame([], index=e_img_clip.keys())
 
 # Prepare the embeddings for FAISS
-embeddings = np.array([embedding.numpy().flatten()for embedding in e_img.values()], dtype=np.float32)
+embeddings = np.array([embedding.numpy().flatten() for embedding in e_img_clip.values()], dtype=np.float32)
 
 # Build an index with the embeddings
 index = faiss.IndexFlatL2(embeddings.shape[1])  # L2 distance metric
 index.add(embeddings)
 
-# Create a dictionary to store image data for faster lookups
-image_data_dict = {}
-for idx, row in images_df.iterrows():
-    image_data_dict[idx] = {
-        'id': row['id'],
-        'brand': row['brand'],
-        'name': row.get('name'),
-        'section': row.get('section'),
-        'img_url': idx,
-        'price': row.get('price'),
-        'old_price': row.get('old_price'),
-        'discount_rate': row.get('discount_rate'),
-        'sale': bool(row.get('sale')),
-        'shop_link': row.get('shop_link')
-    }
 
 @memory.cache
 def compute_text_embeddings(text):
@@ -110,7 +137,6 @@ def compute_text_embeddings(text):
     with torch.no_grad():
         text_features = model.encode_text(text_tokens).cpu().float()
     return text_features
-
 
 @functools.lru_cache(maxsize=None)
 def get_similarity(image_features, text_features):
@@ -120,6 +146,12 @@ def get_similarity(image_features, text_features):
     return similarity
 
 def clean_prompt_text(prompt):
+    if prompt.startswith('a '):
+        prompt = prompt[2:]
+    if prompt.startswith('an '):
+        prompt = prompt[3:]
+    if prompt.startswith('the '):
+        prompt = prompt[4:]
     prompt = prompt.lower().replace('style', '')
     prompt = prompt.replace('fashion', '')
     prompt = prompt.replace('inspiration', '')
@@ -128,7 +160,10 @@ def clean_prompt_text(prompt):
 
 
 def generate_texts(prompt, templates):
-    return [template.format(prompt) for template in templates]
+    if any([x in garment_types for x in prompt.split(' ')]):
+        return [template.format(prompt) for template in templates]
+    else:
+        return [template.format(prompt) for template in templates_with_adjectives]
 
 
 def get_image_query_similarity_score(query, img_url):
@@ -136,15 +171,15 @@ def get_image_query_similarity_score(query, img_url):
         query = clean_prompt_text(query)
         texts = generate_texts(query, templates)
         e_text_cat = torch.cat([compute_text_embeddings(t) for t in texts]).to('cpu')
-        similarity_score = get_similarity(e_img[img_url], e_text_cat).max().item()
+        similarity_score = get_similarity(e_img_clip[img_url], e_text_cat).max().item()
         return similarity_score, None
     except Exception as e:
         return None, str(e)
 
-def compute_similarities(e_img_cat, query, max_k, threshold, blacklist_img_url):
+def compute_similarities(e_img_clip_cat, query, max_k, threshold, blacklist_img_url):
     texts = generate_texts(query, templates)
     e_text_cat = torch.cat([compute_text_embeddings(t) for t in texts]).to('cpu')
-    similarity = get_similarity(e_img_cat, e_text_cat)
+    similarity = get_similarity(e_img_clip_cat, e_text_cat)
     if max_k is not None:
         top_idx = np.array(list(set(similarity.topk(max_k).indices.ravel().tolist())))
     else:
@@ -156,7 +191,7 @@ def compute_similarities(e_img_cat, query, max_k, threshold, blacklist_img_url):
 
     for idx in top_idx:
         idx = idx.item()
-        idx_ = e_img_df.index[idx]
+        idx_ = e_img_clip_df.index[idx]
         item_data = image_data_dict[idx_]
         similarity_max = similarity[:, idx].max().item()
         item_data['similarity'] = similarity_max
@@ -169,16 +204,25 @@ def create_item_data(row):
         'id': row['id'],
         'brand': row['brand'],
         'name': row.get('name'),
-        'section': row.get('section'),
+        'category': row.get('category'),
+        # 'desc_1': row.get('desc_1'),
+        # 'desc_2': row.get('desc_2'),
         'img_url': row.get('img_url'),
         'price': row.get('price'),
         'old_price': row.get('old_price'),
-        'price_float': row.get('price_float'),
-        'old_price_float': row.get('old_price_float'),
+        'currency': row.get('currency'),
         'discount_rate': row.get('discount_rate'),
         'sale': bool(row.get('sale')),
         'shop_link': row.get('shop_link')
     }
+
+
+# Create a dictionary to store image data for faster lookups
+image_data_dict = {}
+for idx, row in images_df.iterrows():
+    image_data_dict[idx] = create_item_data(row)
+    image_data_dict[idx]['img_url'] = idx
+
 
 def retrieve_filtered_images(images_df, filters, language):
     filtered_items = images_df.copy()
@@ -191,17 +235,20 @@ def retrieve_filtered_images(images_df, filters, language):
             print(f"Original: {query}\n")
             query = translate(query, language)
             print(f"English: {query}")
-        similar_items = compute_similarities(e_img_cat, query, max_k=None, threshold=threshold, blacklist_img_url=None)
+        similar_items = compute_similarities(e_img_clip_cat, query, max_k=None, threshold=threshold, blacklist_img_url=None)
+        if len(similar_items) == 0:
+            return None
         similar_items_df = pd.DataFrame(similar_items).set_index('img_url')
         similar_items_df = similar_items_df.sort_values(by='similarity', ascending=False)
         filtered_items = filtered_items.loc[similar_items_df.index]
+        filtered_items['similarity'] = similar_items_df['similarity']
 
-    if filters.get('section'):
-        filtered_items = filtered_items[filtered_items['section'] == filters['section']]
+    if filters.get('category'):
+        filtered_items = filtered_items[filtered_items['category'] == filters['category']]
     if filters.get('min_price'):
-        filtered_items = filtered_items[filtered_items['price_float'] >= filters['min_price']]
+        filtered_items = filtered_items[filtered_items['price'] >= filters['min_price']]
     if filters.get('max_price'):
-        filtered_items = filtered_items[filtered_items['price_float'] <= filters['max_price']]
+        filtered_items = filtered_items[filtered_items['price'] <= filters['max_price']]
     if filters.get('brands'):
         list_brands = [x.lower() for x in filters['brands'].replace("'", "").split(',')]
         filtered_items = filtered_items[filtered_items['brand'].str.lower().isin(list_brands)]
@@ -212,7 +259,8 @@ def retrieve_filtered_images(images_df, filters, language):
         filtered_items = filtered_items[filtered_items['id'].isin(list_ids)]
 
     filtered_items.reset_index(inplace=True)
-    return filtered_items
+
+    return filtered_items.drop_duplicates(['img_url', 'shop_link'])
 
 def retrieve_most_similar_items(input_id, k):
     
@@ -225,7 +273,7 @@ def retrieve_most_similar_items(input_id, k):
         
     input_shop_link =  images_df.loc[input_img_url]['shop_link']
     
-    input_embedding = e_img[input_img_url].numpy().flatten()
+    input_embedding = e_img_clip[input_img_url].numpy().flatten()
     
     _, indices = index.search(np.array([input_embedding], dtype=np.float32), k + 1)
 
@@ -243,10 +291,13 @@ def retrieve_most_similar_items(input_id, k):
         if shop_link in shop_link_similarities:
             if similarity_score > shop_link_similarities[shop_link]:
                 shop_link_similarities[shop_link] = similarity_score
-                similar_images.append(create_item_data(row))
+                item_data = create_item_data(row)
+                item_data['similarity'] = similarity_score
+                similar_images.append(item_data)
         else:
-  
-            similar_images.append(create_item_data(row))
+            item_data = create_item_data(row)
+            item_data['similarity'] = similarity_score
+            similar_images.append(item_data)
     
     return similar_images
 
@@ -259,56 +310,62 @@ def paginate_results(results, page, limit):
 
     return total_results, total_pages, paginated_results
 
-
-def get_image_tags_similarity(img_url):
-
-    results = {}
-
-    for category in e_tags:
-        tag_similarities = []
-        for tag in e_tags[category]:
-            score = get_similarity(e_fclip_img[img_url], e_tags[category][tag].reshape(1,-1)).item()
-            if score is not None:
-                tag_similarities.append(score)
-
-        if tag_similarities:
-            tag_similarity_df = pd.DataFrame({'similarity': tag_similarities}, e_tags[category])
-            results[category] = tag_similarity_df.T.to_dict()
-    return results
-            
-
-def get_image_top_tags(img_url):
-
-    top_tags = {}
-
-    results = get_image_tags_similarity(img_url)
-
-    for category in results:
-        for tag in results[category]:
-            d = results[category][tag]
-            d['category'] = category
-            top_tags[tag] = d
-
-    top_tags_df = pd.DataFrame(top_tags).T
-    p = top_tags_df.groupby('category')['similarity'].rank(pct=True)
-    p.name = 'percentil'
-    top_tags_df = top_tags_df.join(p)
-    top_tags_df = top_tags_df.reset_index().rename(columns={'index': 'tag'})
-    top_tags_df['score'] = top_tags_df['similarity']*top_tags_df['percentil']
-    top_tags_df[top_tags_df['score']>0.2].sort_values(by='score', ascending=False)
-
-    top_tags_dict = top_tags_df[top_tags_df['score']>0.2].sort_values(by='score', ascending=False).groupby('category')['tag'].agg(list).to_dict()
+def get_image_top_tags(img_url, THRESHOLD=0.25):
     
-    return top_tags_dict
+    top_tags_df = tags_df.copy()
 
+    col_name = f'similarity_{col_idx}'
+    top_tags_df[col_name] = pd.Series(tags_similarities_dict[img_url])
+    top_tags_df = top_tags_df[top_tags_df[col_name]>0.2]
+    p = top_tags_df.groupby('category')[col_name].rank(pct=True)
+    p.name = f'percentile_{col_idx}'
+    top_tags_df = top_tags_df.join(p)
+    top_tags_df[f'score_{col_idx}'] = top_tags_df[col_name] * top_tags_df[p.name]
+    
+    # Filter and sort based on score
+    filtered_df = top_tags_df[top_tags_df[f'score_{col_idx}'] > THRESHOLD].sort_values(by=f'score_{col_idx}', ascending=False)
+    
+    # Create a dictionary of top tags for each category and each similarity column
+    tags_by_category = filtered_df.groupby('category')['value'].agg(set).map(lambda x: list(x))
+    tags_by_category = tags_by_category.to_dict()
+
+    return tags_by_category
+
+
+def create_specific_item_data(item_data):
+
+    good_keys = images_tags_df.index.intersection(item_data['img_url'].tolist())
+    all_tags = images_tags_df.loc[good_keys]['tags'].explode().unique().tolist()
+    return {
+        'id': item_data.iloc[0]['id'],
+        'brand': item_data.iloc[0]['brand'],
+        'name': item_data.iloc[0]['name'],
+        'category': item_data.iloc[0]['category'],
+        'desc_1': item_data.iloc[0]['desc_1'],
+        'desc_2': item_data.iloc[0]['desc_2'],
+        'img_url': item_data['img_url'].tolist(),
+        'price': item_data.iloc[0]['price'],
+        'old_price': item_data.iloc[0]['old_price'],
+        'currency': item_data.iloc[0]['currency'],
+        'discount_rate': item_data.iloc[0]['discount_rate'],
+        'sale': bool(item_data.iloc[0]['sale']),
+        'shop_link': item_data.iloc[0]['shop_link'],
+        'tags': all_tags
+    }
+
+def retrieve_product_data(images_df, id):
+    item_data = images_df[images_df['id'] == id].reset_index()
+    if item_data is not None:
+        return create_specific_item_data(item_data)
+    
 @app.route("/api/v1/search", methods=["GET"])
 @cache.cached()
 def get_search_endpoint():
     query = request.args.get('query')
-    threshold = request.args.get('threshold', default=0.23, type=float)
+    threshold = request.args.get('threshold', default=0.21, type=float)
     max_price = request.args.get('maxPrice', type=int)
     min_price = request.args.get('minPrice', type=int)
-    section = request.args.get('section')
+    category = request.args.get('category')
     on_sale = request.args.get("onSale", default=False, type=bool)
     brands = request.args.get('brands')
     list_ids = request.args.get('ids')
@@ -319,13 +376,13 @@ def get_search_endpoint():
     ascending = request.args.get('ascending', default=False, type=bool)
     
 
-    if all([i is None for i in [query, section, on_sale, brands, list_ids]]):
+    if all([i is None for i in [query, category, on_sale, brands, list_ids]]):
         return make_response(jsonify({'error': 'Missing parameter'}), 400)
 
     filters = {
         'query': query,
         'threshold': threshold,
-        'section': section,
+        'category': category,
         'min_price': min_price,
         'max_price': max_price,
         'brands': brands,
@@ -335,19 +392,24 @@ def get_search_endpoint():
 
     results = retrieve_filtered_images(images_df, filters, language)
     
+        
+    available_brands, min_overall_price, max_overall_price = '', 0, 0
+
+    if (results is None) or (len(results)==0):
+        return make_response(jsonify({'error': 'Results no found'}), 204)
+        
+    available_brands = results['brand'].unique().tolist()
+    min_overall_price = results['price'].min()
+    max_overall_price = results['price'].max()
+    all_img_urls = results['img_url'].head(30).unique().tolist()
+    good_keys = images_tags_df.index.intersection(all_img_urls)
+    all_tags = images_tags_df.loc[good_keys]['tags'].explode().unique().tolist()
+
     if sort_by:
         list_sort_by = sort_by.replace("'", "").split(',')
         results = results.sort_values(by=list_sort_by, ascending=ascending)
-        
-    available_brands, min_overall_price, max_overall_price = '', 0, 0
-    if (results is not None) or (len(results)>0):
-        available_brands = results['brand'].unique().tolist()
-        min_overall_price = results['price_float'].min()
-        max_overall_price = results['price_float'].max()
-        
-    results = results.apply(create_item_data, axis=1)
-        
-    results = results.tolist()
+    
+    results = results.to_dict(orient='records')
 
     total_results, total_pages, paginated_results = paginate_results(results, page, limit)
 
@@ -358,8 +420,24 @@ def get_search_endpoint():
         'total_results': total_results,
         'total_pages': total_pages,
         'metadata': {'brands': available_brands, 
-                     'min_price': min_overall_price,
-                     'max_price': max_overall_price}
+                    'min_price': min_overall_price,
+                    'max_price': max_overall_price,
+                    'tags': all_tags}
+    })
+
+@app.route("/api/v1/product", methods=["GET"])
+@cache.cached()
+def get_product_endpoint():
+    id = request.args.get('id')
+
+    if all([i is None for i in [id]]):
+        return make_response(jsonify({'error': 'Missing parameter'}), 400)
+
+
+    result = retrieve_product_data(all_images_df, id)
+    
+    return jsonify({
+        'result': result
     })
        
 
@@ -398,36 +476,6 @@ def get_image_query_similarity_endpoint():
        
     return jsonify({
         'similarity_score': score
-    })
-
-@app.route("/api/v1/image_tags_similarity", methods=["GET"])
-@cache.cached()
-def get_image_tags_similarity_endpoint():
-
-    img_url = request.args.get('img_url', type=str)
-
-    if img_url is None:
-        return make_response(jsonify({'error': 'Missing parameter'}), 400)
-
-    results = get_image_tags_similarity(img_url)
-    
-    return jsonify({
-        'tags': results
-    })
-    
-@app.route("/api/v1/image_top_tags", methods=["GET"])
-@cache.cached()
-def get_image_top_tags_endpoint():
-
-    img_url = request.args.get('img_url', type=str)
-
-    if img_url is None:
-        return make_response(jsonify({'error': 'Missing parameter'}), 400)
-
-    results = get_image_top_tags(img_url)
-    
-    return jsonify({
-        'tags': results
     })
 
 if __name__ == "__main__":

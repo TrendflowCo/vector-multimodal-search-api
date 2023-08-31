@@ -15,19 +15,45 @@ from utils import *
 # from gcp_utils import *
 from fetch_data import *
 from templates import templates, templates_with_adjectives, garment_types
+from flasgger import Swagger
+
 
 # Create a cache for storing text embeddings
 cache_dir = './cache'
 memory = Memory(cache_dir, verbose=0)
 
+
+swagger_config = {
+    "headers": [
+    ],
+    "specs": [
+        {
+            "endpoint": "apispec_1",
+            "route": "/apispec_1.json",
+            "rule_filter": lambda rule: True,
+            "model_filter": lambda tag: True,
+        }
+    ],
+    "static_url_path": "/flasgger_static",
+    "swagger_ui": True,
+    "specs_route": "/swagger/",
+}
+
 app = Flask(__name__)
-cache = Cache(app)
-CORS(app)
+app.config['SWAGGER'] = {
+    'title': 'Your API Title',
+    'uiversion': 3
+}
+
 
 # Set up cache configuration
 app.config['CACHE_TYPE'] = 'SimpleCache'
 # app.config['CACHE_DIR'] = './app_cache'
 app.config['CACHE_DEFAULT_TIMEOUT'] = 3600*24 # 5 minutes
+
+swagger = Swagger(app, config=swagger_config)
+cache = Cache(app)
+CORS(app)
 
 # Load the CLIP model
 model, preprocess = clip.load("ViT-L/14@336px")
@@ -361,6 +387,111 @@ def retrieve_product_data(images_df, id):
 @app.route("/api/v1/search", methods=["GET"])
 @cache.cached()
 def get_search_endpoint():
+    """
+    Search for products based on various filters.
+
+    ---
+    parameters:
+      - name: query
+        in: query
+        type: string
+        required: false
+        description: Search query.
+      - name: threshold
+        in: query
+        type: number
+        required: false
+        description: Search threshold.
+      - name: maxPrice
+        in: query
+        type: integer
+        required: false
+        description: Maximum price.
+      - name: minPrice
+        in: query
+        type: integer
+        required: false
+        description: Minimum price.
+      - name: category
+        in: query
+        type: string
+        required: false
+        description: Product category.
+      - name: onSale
+        in: query
+        type: boolean
+        required: false
+        description: Filter by on sale status.
+      - name: brands
+        in: query
+        type: string
+        required: false
+        description: Brands to filter by.
+      - name: ids
+        in: query
+        type: string
+        required: false
+        description: List of product IDs to filter by.
+      - name: language
+        in: query
+        type: string
+        required: false
+        description: Language for results (default en).
+      - name: page
+        in: query
+        type: integer
+        required: false
+        description: Page number for pagination (default 1).
+      - name: limit
+        in: query
+        type: integer
+        required: false
+        description: Number of results per page (default 100).
+      - name: sortBy
+        in: query
+        type: string
+        required: false
+        description: Comma-separated list of fields to sort by.
+      - name: ascending
+        in: query
+        type: boolean
+        required: false
+        description: Sort results in ascending order (default false).
+    responses:
+      200:
+        description: List of filtered products.
+        schema:
+          type: object
+          properties:
+            results:
+              type: array
+              items:
+                type: object  # Define your result structure here
+            page:
+              type: integer
+            limit:
+              type: integer
+            total_results:
+              type: integer
+            total_pages:
+              type: integer
+            metadata:
+              type: object
+              properties:
+                brands:
+                  type: array
+                  items:
+                    type: string
+                min_price:
+                  type: number
+                max_price:
+                  type: number
+                tags:
+                  type: array
+                  items:
+                    type: string
+    """
+
     query = request.args.get('query')
     threshold = request.args.get('threshold', default=0.21, type=float)
     max_price = request.args.get('maxPrice', type=int)
@@ -428,6 +559,26 @@ def get_search_endpoint():
 @app.route("/api/v1/product", methods=["GET"])
 @cache.cached()
 def get_product_endpoint():
+    """
+    Get product details by ID.
+
+    ---
+    parameters:
+      - name: id
+        in: query
+        type: string
+        required: true
+        description: Product ID.
+    responses:
+      200:
+        description: Product details.
+        schema:
+          type: object  # Define your result structure here
+          properties:
+            result:
+              type: object
+    """
+    
     id = request.args.get('id')
 
     if all([i is None for i in [id]]):
@@ -444,6 +595,32 @@ def get_product_endpoint():
 @app.route("/api/v1/most_similar_items", methods=["GET"])
 @cache.cached()
 def retrieve_most_similar_items_endpoint():
+    """
+    Get a list of most similar items to a given product.
+
+    ---
+    parameters:
+      - name: id
+        in: query
+        type: string
+        required: true
+        description: Product ID.
+      - name: threshold
+        in: query
+        type: integer
+        required: false
+        description: Number of similar items to retrieve (default 20).
+    responses:
+      200:
+        description: List of most similar items.
+        schema:
+          type: object  # Define your result structure here
+          properties:
+            results:
+              type: array
+              items:
+                type: object
+    """
     id = request.args.get('id', type=str)
     top_k = request.args.get('threshold', default=20, type=int)
 
@@ -462,6 +639,30 @@ def retrieve_most_similar_items_endpoint():
 @app.route("/api/v1/image_query_similarity", methods=["GET"])
 @cache.cached()
 def get_image_query_similarity_endpoint():
+    """
+    Get similarity score between an image query and an image URL.
+
+    ---
+    parameters:
+      - name: query
+        in: query
+        type: string
+        required: true
+        description: Image query.
+      - name: img_url
+        in: query
+        type: string
+        required: true
+        description: Image URL.
+    responses:
+      200:
+        description: Similarity score.
+        schema:
+          type: object  # Define your result structure here
+          properties:
+            similarity_score:
+              type: number
+    """
     query = request.args.get('query', type=str)
     img_url = request.args.get('img_url', type=str)
     
@@ -477,6 +678,7 @@ def get_image_query_similarity_endpoint():
     return jsonify({
         'similarity_score': score
     })
+
 
 if __name__ == "__main__":
     app.run(debug=True)

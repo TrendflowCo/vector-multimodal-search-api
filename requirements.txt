@@ -12,6 +12,7 @@ joblib
 Flask-Caching
 faiss-cpu==1.7.4
 transformers
+flasgger==0.9.7b2
 
 db-dtypes
 google-api-core

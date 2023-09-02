@@ -16,7 +16,7 @@ from utils import *
 from fetch_data import *
 from templates import templates, templates_with_adjectives, garment_types
 from flasgger import Swagger
-
+import translations
 
 # Create a cache for storing text embeddings
 cache_dir = './cache'
@@ -40,20 +40,19 @@ swagger_config = {
 }
 
 app = Flask(__name__)
-app.config['SWAGGER'] = {
-    'title': 'Your API Title',
-    'uiversion': 3
-}
-
+cache = Cache(app)
+swagger = Swagger(app, config=swagger_config)
+CORS(app)
 
 # Set up cache configuration
 app.config['CACHE_TYPE'] = 'SimpleCache'
 # app.config['CACHE_DIR'] = './app_cache'
 app.config['CACHE_DEFAULT_TIMEOUT'] = 3600*24 # 5 minutes
+app.config['SWAGGER'] = {
+    'title': 'Fashion CLIP Search API',
+    'uiversion': 3
+}
 
-swagger = Swagger(app, config=swagger_config)
-cache = Cache(app)
-CORS(app)
 
 # Load the CLIP model
 model, preprocess = clip.load("ViT-L/14@336px")
@@ -358,10 +357,11 @@ def get_image_top_tags(img_url, THRESHOLD=0.25):
     return tags_by_category
 
 
-def create_specific_item_data(item_data):
+def create_specific_item_data(item_data, language='en'):
 
     good_keys = images_tags_df.index.intersection(item_data['img_url'].tolist())
-    all_tags = images_tags_df.loc[good_keys]['tags'].explode().unique().tolist()
+    all_tags = images_tags_df.loc[good_keys]['tags'].explode().drop_duplicates().map(translations.tags[language]).dropna().unique().tolist()
+    # all_tags = [translations.tags[language][tag] for tag in all_tags]
     return {
         'id': item_data.iloc[0]['id'],
         'brand': item_data.iloc[0]['brand'],
@@ -379,10 +379,10 @@ def create_specific_item_data(item_data):
         'tags': all_tags
     }
 
-def retrieve_product_data(images_df, id):
+def retrieve_product_data(images_df, id, language='en'):
     item_data = images_df[images_df['id'] == id].reset_index()
     if item_data is not None:
-        return create_specific_item_data(item_data)
+        return create_specific_item_data(item_data, language)
     
 @app.route("/api/v1/search", methods=["GET"])
 @cache.cached()
@@ -534,7 +534,8 @@ def get_search_endpoint():
     max_overall_price = results['price'].max()
     all_img_urls = results['img_url'].head(30).unique().tolist()
     good_keys = images_tags_df.index.intersection(all_img_urls)
-    all_tags = images_tags_df.loc[good_keys]['tags'].explode().unique().tolist()
+    all_tags = images_tags_df.loc[good_keys]['tags'].explode().drop_duplicates().map(translations.tags[language]).dropna().unique().tolist()
+    # all_tags = [translations.tags[language][tag] for tag in all_tags]
 
     if sort_by:
         list_sort_by = sort_by.replace("'", "").split(',')
@@ -569,6 +570,11 @@ def get_product_endpoint():
         type: string
         required: true
         description: Product ID.
+      - name: language
+        in: query
+        type: string
+        required: false
+        description: Language for results (default en).
     responses:
       200:
         description: Product details.
@@ -580,12 +586,13 @@ def get_product_endpoint():
     """
     
     id = request.args.get('id')
+    language = request.args.get('language', default='en')
 
     if all([i is None for i in [id]]):
         return make_response(jsonify({'error': 'Missing parameter'}), 400)
 
 
-    result = retrieve_product_data(all_images_df, id)
+    result = retrieve_product_data(all_images_df, id, language)
     
     return jsonify({
         'result': result

@@ -17,6 +17,21 @@ from fetch_data import *
 from templates import templates, templates_with_adjectives, garment_types
 from flasgger import Swagger
 import translations
+# from sentence_transformers.util import semantic_search
+# from transformers import AutoTokenizer, AutoModel
+
+
+# # Load model from HuggingFace Hub
+# tokenizer = AutoTokenizer.from_pretrained('sentence-transformers/all-MiniLM-L6-v2')
+# model_miniLM = AutoModel.from_pretrained('sentence-transformers/all-MiniLM-L6-v2')
+
+# Load the CLIP model
+model, preprocess = clip.load("ViT-L/14@336px")
+model.cpu().eval()
+input_resolution = model.visual.input_resolution
+context_length = model.context_length
+vocab_size = model.vocab_size
+        
 
 # Create a cache for storing text embeddings
 cache_dir = './cache'
@@ -53,14 +68,6 @@ app.config['SWAGGER'] = {
     'uiversion': 3
 }
 
-
-# Load the CLIP model
-model, preprocess = clip.load("ViT-L/14@336px")
-model.cpu().eval()
-input_resolution = model.visual.input_resolution
-context_length = model.context_length
-vocab_size = model.vocab_size
-        
 blacklist = ['https://www.stradivarius.com/es/coletero-grande-saten-l00150411']
 
 
@@ -90,8 +97,7 @@ INNER JOIN (
     ON a.id = latest_items.id AND a.updated_at = latest_items.latest_update
 WHERE b.img_url IS NOT NULL"""
 
-images_df = query_datasets_to_df(query).drop_duplicates(['img_url']).set_index('img_url')
-
+images_df = query_datasets_to_df(query).drop_duplicates(['img_url'])
 
 query = f"""
 SELECT
@@ -119,14 +125,26 @@ query = f"""
 SELECT
 a.img_id, 
 a.category, 
-a.tags,
+a.value,
+a.score,
 b.img_url
-from `dokuso.tagging.images`a
+from `dokuso.tagging.images_scores`a
 left join `dokuso.listing_products.images` b
 on a.img_id = b.id
 """
+TAGS_THRESHOLD = 0.24
+images_tags_df = query_datasets_to_df(query).set_index('img_url').drop_duplicates()
+images_tags_df = images_tags_df[images_tags_df['score']>TAGS_THRESHOLD]
 
-images_tags_df = query_datasets_to_df(query).set_index('img_url')
+# query = f"""
+# SELECT
+# *
+# from `dokuso.embeddings.custom_text_all_MiniLM_L6_v2` a
+# """
+# texts_df = query_datasets_to_df(query).set_index('id_item')
+# e_text_fclip = texts_df['features'].T.to_dict()
+# e_text_fclip = {k: torch.tensor(v).reshape(1, -1).float() for k,v in e_text_fclip.items() if (v is not None)}
+# list_text_item_ids = list(e_text_fclip.keys())
 
 blacklist_img_url = images_df[images_df['shop_link'].isin(blacklist)].index.tolist()
 
@@ -143,7 +161,17 @@ images_df['old_price'] = images_df['old_price'].fillna(images_df['price'])
 images_df['discount_rate'] = images_df['discount_rate'].fillna(0)
 all_images_df = images_df.copy()
 
-images_df = images_df[images_df.index.isin(list_urls)]
+images_df = images_df.set_index('img_url')
+images_df = images_df.loc[list_urls]
+
+# items_df = images_df.reset_index().drop_duplicates(['id', 'shop_link']).set_index('id')
+# good_item_ids = items_df.index.intersection(list_text_item_ids)
+# e_text_fclip = {k: v for k,v in e_text_fclip.items() if k in good_item_ids}
+# e_text_fclip_cat = torch.cat(list(e_text_fclip.values()))
+# list_text_item_ids = list(e_text_fclip.keys())
+# texts_df = texts_df.loc[list_text_item_ids]
+
+# print("len(items_df)", len(items_df))
 
 e_img_clip_cat = torch.cat(list(e_img_clip.values()))
 e_img_clip_df = pd.DataFrame([], index=e_img_clip.keys())
@@ -170,6 +198,52 @@ def get_similarity(image_features, text_features):
     similarity = text_features_normalized @ image_features_normalized.T
     return similarity
 
+
+# #Mean Pooling - Take attention mask into account for correct averaging
+# def mean_pooling(model_output, attention_mask):
+#     token_embeddings = model_output[0] #First element of model_output contains all token embeddings
+#     input_mask_expanded = attention_mask.unsqueeze(-1).expand(token_embeddings.size()).float()
+#     return torch.sum(token_embeddings * input_mask_expanded, 1) / torch.clamp(input_mask_expanded.sum(1), min=1e-9)
+
+
+# def encode(texts):
+    
+#     try:
+#         # Tokenize sentences
+#         encoded_input = tokenizer(texts, padding=True, truncation=False, return_tensors='pt')
+
+#         # Compute token embeddings
+#         with torch.no_grad():
+#             model_output = model_miniLM(**encoded_input)
+
+#         # Perform pooling
+#         sentence_embeddings = mean_pooling(model_output, encoded_input['attention_mask'])
+
+#         # Normalize embeddings
+#         sentence_embeddings = F.normalize(sentence_embeddings, p=2, dim=1)
+
+#         return sentence_embeddings
+    
+#     except:
+#         return None
+    
+
+# def retrieve_most_similar_text(query, THRESHOLD = 0.35):
+#     question = [query]
+#     output = encode(question)
+#     query_embeddings = torch.FloatTensor(output)
+
+#     hits = semantic_search(query_embeddings, e_text_fclip_cat, top_k=len(items_df))
+#     results_df = pd.DataFrame(hits[0])
+#     if len(hits[0]) == 0:
+#         raise ValueError('Error')
+#     ids = results_df['corpus_id'].tolist()
+#     results = items_df.loc[[list_text_item_ids[id_] for id_ in ids]]
+#     results['query_score'] =  results_df['score'].tolist()
+#     results = results[results['query_score']>=THRESHOLD]
+
+#     return results.reset_index()
+    
 def clean_prompt_text(prompt):
     if prompt.startswith('a '):
         prompt = prompt[2:]
@@ -241,7 +315,6 @@ def create_item_data(row):
         'shop_link': row.get('shop_link')
     }
 
-
 # Create a dictionary to store image data for faster lookups
 image_data_dict = {}
 for idx, row in images_df.iterrows():
@@ -249,17 +322,12 @@ for idx, row in images_df.iterrows():
     image_data_dict[idx]['img_url'] = idx
 
 
-def retrieve_filtered_images(images_df, filters, language):
+def retrieve_filtered_images(images_df, filters):
     filtered_items = images_df.copy()
 
     if filters.get('query'):
         query = filters['query']
         threshold = filters.get('threshold', 0.21)
-        if language != 'en':
-            print(f"Translation from {language} to en: \n")
-            print(f"Original: {query}\n")
-            query = translate(query, language)
-            print(f"English: {query}")
         similar_items = compute_similarities(e_img_clip_cat, query, max_k=None, threshold=threshold, blacklist_img_url=None)
         if len(similar_items) == 0:
             return None
@@ -282,10 +350,8 @@ def retrieve_filtered_images(images_df, filters, language):
     if filters.get('ids'):
         list_ids = filters['ids'].replace("'", "").split(',')
         filtered_items = filtered_items[filtered_items['id'].isin(list_ids)]
-
-    filtered_items.reset_index(inplace=True)
-
-    return filtered_items.drop_duplicates(['img_url', 'shop_link'])
+    
+    return filtered_items.reset_index().drop_duplicates(['img_url', 'shop_link'])
 
 def retrieve_most_similar_items(input_id, k):
     
@@ -359,8 +425,8 @@ def get_image_top_tags(img_url, THRESHOLD=0.25):
 
 def create_specific_item_data(item_data, language='en'):
 
-    good_keys = images_tags_df.index.intersection(item_data['img_url'].tolist())
-    all_tags = images_tags_df.loc[good_keys]['tags'].explode().drop_duplicates().map(translations.tags[language]).dropna().unique().tolist()
+    good_image_ids = images_tags_df.index.intersection(item_data['img_url'].tolist())
+    all_tags = images_tags_df.loc[good_image_ids]['value'].explode().drop_duplicates().map(translations.tags[language]).dropna().unique().tolist()
     # all_tags = [translations.tags[language][tag] for tag in all_tags]
     return {
         'id': item_data.iloc[0]['id'],
@@ -510,6 +576,13 @@ def get_search_endpoint():
     if all([i is None for i in [query, category, on_sale, brands, list_ids]]):
         return make_response(jsonify({'error': 'Missing parameter'}), 400)
 
+
+    if language != 'en':
+        print(f"Translation from {language} to en: \n")
+        print(f"Original: {query}\n")
+        query = translate(query, language)
+        print(f"English: {query}")
+
     filters = {
         'query': query,
         'threshold': threshold,
@@ -521,9 +594,19 @@ def get_search_endpoint():
         'ids': list_ids
     }
 
-    results = retrieve_filtered_images(images_df, filters, language)
-    
-        
+    results = retrieve_filtered_images(images_df, filters)
+
+    # results_clip = retrieve_filtered_images(images_df, filters)
+
+    # results_LM_mini = retrieve_most_similar_text(filters['query'])
+
+    # results = pd.merge(results_clip, results_LM_mini[['query_score', 'img_url']], on='img_url', how='inner')
+    # results = results.reset_index().drop_duplicates(['img_url', 'shop_link'])
+    # results['final_score'] = results['similarity']*results['query_score']
+    # results = results.sort_values(by='final_score', ascending=False)
+
+    # results = results[results['final_score']>0.12]
+
     available_brands, min_overall_price, max_overall_price = '', 0, 0
 
     if (results is None) or (len(results)==0):
@@ -534,7 +617,7 @@ def get_search_endpoint():
     max_overall_price = results['price'].max()
     all_img_urls = results['img_url'].head(30).unique().tolist()
     good_keys = images_tags_df.index.intersection(all_img_urls)
-    all_tags = images_tags_df.loc[good_keys]['tags'].explode().drop_duplicates().map(translations.tags[language]).dropna().unique().tolist()
+    all_tags = images_tags_df.loc[good_keys]['value'].explode().drop_duplicates().map(translations.tags[language]).dropna().unique().tolist()
     # all_tags = [translations.tags[language][tag] for tag in all_tags]
 
     if sort_by:

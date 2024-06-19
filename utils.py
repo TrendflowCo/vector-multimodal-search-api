@@ -34,3 +34,23 @@ def extract_price_info(query):
         query_without_price = query
 
     return int(price) if price is not None else None, currency, query_without_price
+
+
+def extract_negative_keywords(text):
+    """
+    Extracts words following each "-" in the given text.
+
+    Parameters:
+    text (str): The input text from which to extract words.
+
+    Returns:
+    list: A list of words or phrases following each "-" character.
+    """
+    # Regular expression pattern to find words following "-"
+    pattern = r'-(\w+|\w+(?: \w+)*)'
+    
+    # Find all occurrences of the pattern
+    matches = re.findall(pattern, text)
+
+    return matches
+

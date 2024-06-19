@@ -67,7 +67,7 @@ SELECT *
 FROM `dokuso.production.combined`
 """
 
-combined_df = query_datasets_to_df(combined_query)
+combined_df = query_datasets_to_df(combined_query).drop_duplicates(subset='shop_link').reset_index(drop=True)
 
 combined_tags_query = """
 SELECT *
@@ -79,7 +79,7 @@ images_tags_df = query_datasets_to_df(combined_tags_query)
 print(len(images_tags_df))
 
 # Extracting all_images_df
-all_images_df = combined_df.drop(columns=['features']).drop_duplicates()
+all_images_df = combined_df.drop(columns=['features'])
 all_images_df['old_price'] = all_images_df['old_price'].fillna(all_images_df['price'])
 
 # Extracting images_tags_df
@@ -428,10 +428,15 @@ def retrieve_filtered_images(images_df, filters):
                     filters['query'] = filters['query'].replace(brand+"'s", '').replace(brand, '')
                 for w in conn_brand_words:
                     filters['query'] = filters['query'].replace(w, '')
-            query_categories = [cat for cat in all_categories if cat in filters['query']]
+
+            query_categories = []
+            for w in filters['query'].split(' '):
+                w_ = w.replace('s', '').replace("'", '')
+                if w_ in all_categories:
+                    query_categories.append(w_)
             
             if len(query_categories)>0:
-                filters['category'] = ','.join(query_categories)
+                filters['category'] = query_categories[0]
                 for cat in query_categories:
                     filters['query'] = filters['query'].replace(cat+"'s", '').replace(cat, '')
                 for w in conn_cat_words:
@@ -448,12 +453,23 @@ def retrieve_filtered_images(images_df, filters):
                     for w in conn_price_words:
                         filters['query'] = filters['query'].replace(w, '')
             
-            similar_items = compute_text_image_similarities(e_img_clip_cat, filters['query'], max_k=None, threshold=threshold)
-        
+
+            negative_keywords = extract_negative_keywords(filters['query'])
+            clean_query = ' '.join([w for w in filters['query'].split(' ') if w.replace('-', '') not in negative_keywords])
+            similar_items = compute_text_image_similarities(e_img_clip_cat, clean_query, max_k=None, threshold=threshold)
+       
         if len(similar_items) == 0:
             return None
         
         similar_items_df = pd.DataFrame(similar_items).set_index('img_url')
+
+        if len(negative_keywords)>0:
+            blacklist = []
+            for keyword in negative_keywords:
+                negative_results = compute_text_image_similarities(e_img_clip_cat, f'{clean_query} {keyword}', max_k=None, threshold=threshold)
+                blacklist += [item['img_url'] for item in negative_results]
+            similar_items_df = similar_items_df[~similar_items_df.index.isin(blacklist)]
+
         similar_items_df = similar_items_df.sort_values(by='similarity', ascending=False)
         filtered_items = filtered_items.loc[similar_items_df.index]
         filtered_items['similarity'] = similar_items_df['similarity']

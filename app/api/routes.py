@@ -1,64 +1,87 @@
+from functools import lru_cache
+import validators
 import logging
 import traceback
+from flask import Blueprint, request, jsonify, make_response
+from app.services.weviate_service import WeaviateService
+from app.common.exceptions import InvalidParameterError, DataNotFoundError, ProcessingError
+from werkzeug.exceptions import HTTPException
+from app.localization import translations
+from app.common.utilities import str_to_bool
+from app.config import WEVIATE_CLASS_NAME  # Import the WEVIATE_CLASS_NAME
+from app.data.filter_builder import FilterBuilder
 
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
-from flask import Blueprint, request, jsonify, make_response
-from app.services.image_service import ImageService
-from app.services.text_service import TextService
-from app.services.similarity_service import SimilarityService
-from app.localization import translations
-from app.data.data_access import DataAccess
-from app.data.data_processing import ImageDataProcessor, ImageIndexBuilder
-from app.common.utilities import paginate_results, concatenate_embeddings, create_item_data
-from app.common.exceptions import DataNotFoundError, InvalidParameterError
-import torch
-import pandas as pd
-import numpy as np
-import faiss
-from werkzeug.exceptions import HTTPException
+# Initialize Weaviate service
+weaviate_service = WeaviateService()
 
 bp = Blueprint('api', __name__)
 
-data_access = DataAccess()
-image_data_processor = ImageDataProcessor(data_access)
-image_index_builder = ImageIndexBuilder(image_data_processor.e_img_clip_dict, image_data_processor.images_df, pd.DataFrame([], index=image_data_processor.e_img_clip_dict.keys()))
+@lru_cache(maxsize=None)
+def get_cached_similar_images(image_url, top_k):
+    return weaviate_service.get_similar_items(image_url, top_k)
+@lru_cache(maxsize=None)
+def search_cached(properties, query, page, limit, threshold, search_type, filters):
+    return weaviate_service.search_with_text(properties=properties,
+                                            query_text=query, 
+                                            threshold=threshold, 
+                                            search_type=search_type, 
+                                            filters=filters, 
+                                            limit=limit, 
+                                            offset=(page - 1) * limit)
 
-similarity_service = SimilarityService(
-    images_df=image_data_processor.images_df,
-    e_img_clip_dict=image_data_processor.e_img_clip_dict,
-    e_img_clip_cat=concatenate_embeddings(list(image_data_processor.e_img_clip_dict.values())),
-    e_img_clip_df=pd.DataFrame([], index=image_data_processor.e_img_clip_dict.keys()),
-    image_data_dict={idx: {**create_item_data(row), 'img_url': idx} for idx, row in image_data_processor.images_df.iterrows()},
-    image_index_builder=image_index_builder
-)
 
-@bp.route('/similar_images/<image_url>', methods=['GET'])
-def get_similar_images(image_url):
+@bp.route('/similar_images', methods=['GET'])
+def get_similar_images():
+    """
+    Get similar images based on the provided image URL.
+
+    ---
+    parameters:
+    - name: imageUrl
+      in: query
+      type: string
+      required: true
+      description: URL of the image to find similar images for.
+
+    - name: top_k
+      in: query
+      type: integer
+      required: false
+      description: Number of similar images to retrieve (default 10, max 100).
+
+    responses:
+    200:
+      description: Similar images retrieved successfully.
+      schema:
+        type: object
+        properties:
+          message:
+            type: string
+            description: Success message.
+          data:
+            type: object
+            description: Retrieved similar images data.
+    """
     try:
-        top_k = request.args.get('top_k', default=10, type=int)
-        similar_images = similarity_service.retrieve_similar_images(image_url, top_k)
+        image_url = request.args.get('imageUrl')
+        # Validate `image_url` to ensure it is a valid URL
+        if not validators.url(image_url):
+            raise InvalidParameterError('Invalid URL provided')
+        
+        # Log the request data for better traceability
+        logging.info(f"Request data - image_url: {image_url}")
+        
+        # Sanitize the `top_k` parameter to ensure it is within an acceptable range
+        top_k = min(max(request.args.get('top_k', default=10, type=int), 1), 100)
+        
+        similar_images = get_cached_similar_images(image_url, top_k)
+        
         return jsonify({'message': 'Similar images retrieved successfully', 'data': similar_images})
     except Exception as e:
-        logging.error(f"Failed to retrieve similar images: {str(e)}\n{traceback.format_exc()}")
-        return make_response(jsonify({'error': 'Failed to retrieve similar images'}), 400)
-
-@bp.route('/text_image_similarity', methods=['POST'])
-def get_text_image_similarity():
-    try:
-        data = request.json
-        text = data.get('text')
-        image_url = data.get('image_url')
-        if not text or not image_url:
-            raise InvalidParameterError("Text and image URL must be provided")
-        similarity_score = similarity_service.compute_similarity_between_text_and_image(text, image_url)
-        return jsonify({'message': 'Similarity score calculated successfully', 'similarity_score': similarity_score})
-    except InvalidParameterError as e:
-        logging.error(f"Invalid parameters: {str(e)}")
-        return make_response(jsonify({'error': str(e)}), 400)
-    except Exception as e:
-        logging.error(f"Error computing similarity: {str(e)}\n{traceback.format_exc()}")
-        return make_response(jsonify({'error': 'Error computing similarity'}), 400)
+        logging.error(f"Error occurred: {str(e)}\n{traceback.format_exc()}")
+        raise ProcessingError('An error occurred while processing the request for similar images')
 
 @bp.route('/search', methods=['GET'])
 def search():
@@ -142,6 +165,26 @@ def search():
         type: boolean
         required: false
         description: Sort results in ascending order (default false).
+      - name: search_type
+        in: query
+        type: string
+        required: false
+        description: Search type (default bm25).
+      - name: threshold
+        in: query
+        type: number
+        required: false
+        description: Search threshold (default 0.5).
+      - name: country
+        in: query
+        type: string
+        required: false
+        description: Country for filtering products.
+      - name: currency
+        in: query
+        type: string
+        required: false
+        description: Currency for filtering products.
     responses:
       200:
         description: List of filtered products.
@@ -177,88 +220,107 @@ def search():
                     type: string
     """
     try:
-        query = request.args.get('query')
-        image_url = request.args.get('imageUrl')
-        threshold = request.args.get('threshold', default=0.21, type=float)
-        max_price = request.args.get('maxPrice', type=int)
-        min_price = request.args.get('minPrice', type=int)
-        category = request.args.get('category')
-        on_sale = request.args.get("onSale", default=False, type=bool)
-        tags = request.args.get('tags')
-        brands = request.args.get('brands')
-        list_ids = request.args.get('ids')
-        language = request.args.get('language', default='en')
+        query = request.args.get('query', type=str)
         page = request.args.get('page', default=1, type=int)
         limit = request.args.get('limit', default=100, type=int)
-        sort_by = request.args.get('sortBy')
-        ascending = request.args.get('ascending', default=False, type=bool)
-        
+        sort_by = request.args.get('sortBy', type=str)
+        ascending = request.args.get('ascending', default='false')
+        ascending = str_to_bool(ascending)  # Convert to boolean
+        threshold = request.args.get('threshold', default=0.8, type=float)  # Default threshold for vector search
+        max_price = request.args.get('maxPrice', type=int)
+        min_price = request.args.get('minPrice', type=int)
+        category = request.args.get('category', type=str)
+        on_sale = request.args.get("onSale", default='false')
+        on_sale = str_to_bool(on_sale)  # Convert to boolean
+        tags = request.args.get('tags', type=str)
+        brands = request.args.get('brands', type=str)
+        list_ids = request.args.get('ids', type=str)
+        search_type = request.args.get('search_type', default='clip', type=str)
+        country = request.args.get('country', default='es', type=str)
+        language = request.args.get('language', default='es', type=str)
+        currency = request.args.get('currency', type=str)
 
-        if all([i is None for i in [query, category, image_url, on_sale, brands, list_ids]]):
-            return make_response(jsonify({'error': 'Missing parameter'}), 400)
+        if not query:
+            return make_response(jsonify({'error': 'Query parameter is required'}), 400)
 
-        filters = {
-            'query': query,
-            'image_url': image_url,
-            'threshold': threshold,
-            'category': category,
+        params = {
             'min_price': min_price,
             'max_price': max_price,
-            'tags': tags,
             'brands': brands,
+            'tags': tags,
+            'category': category,
             'on_sale': on_sale,
-            'ids': list_ids,
-            'language': language
+            'list_ids': list_ids,
+            'country': country,
+            'currency': currency
         }
-
-        results = similarity_service.retrieve_filtered_images(filters)
-
-        available_brands, min_overall_price, max_overall_price = '', 0, 0
-
-        if (results is None) or (len(results)==0):
-            return make_response(jsonify({'error': 'Results no found'}), 204)
-            
-        available_brands = results['brand'].unique().tolist()
-        min_overall_price = results['price'].min()
-        max_overall_price = results['price'].max()
-        all_img_urls = results['img_url'].head(30).unique().tolist()
-        good_keys = image_data_processor.images_tags_df.index.intersection(all_img_urls)
-        all_tags = image_data_processor.images_tags_df.loc[good_keys]['value'].explode().drop_duplicates().map(translations.tags[language]).dropna().unique().tolist()
-        # all_tags = [translations.tags[language][tag] for tag in all_tags]
+        filters = FilterBuilder.build_filters(params)
+        
+        # Define properties
+        properties = ['id_item',
+         'shop_link',
+         'brand',
+         'name',
+         'desc_1',
+         'desc_2',
+         'category',
+         'price',
+         'old_price',
+         'country',
+         'language',
+         'currency',
+         'discount_rate',
+         'sale',
+         'id_img',
+         'img_url',
+         'tags']
     
-
-        if sort_by:
-            list_sort_by = sort_by.replace("'", "").split(',')
-            results = results.sort_values(by=list_sort_by, ascending=ascending)
         
-        results = results.to_dict(orient='records')
+        # Execute search with Weaviate
+        results = weaviate_service.search_with_text(
+            properties=properties,
+            query_text=query, 
+            threshold=threshold, 
+            search_type=search_type, 
+            filters=filters, 
+            limit=limit, 
+            offset=(page - 1) * limit,
+            sort_by=sort_by,
+            ascending=ascending
+        )
 
-        total_results, total_pages, paginated_results = paginate_results(results, page, limit)
+        # Process results for response
+        results_data = results.get('data', {}).get('Get', {}).get(WEVIATE_CLASS_NAME, [])
+        if not results_data:
+            return make_response(jsonify({'error': 'No results found'}), 404) 
         
+        total_results = len(results_data)  # This might need adjustment based on actual Weaviate response
+        total_pages = (total_results + limit - 1) // limit
+
+        # Translate tags if necessary
+        all_tags = []
+        for item in results_data:
+            if 'tags' in item:  # Ensure that the 'tags' key exists in the item
+                for tag in item['tags']:
+                    # Translate each tag and append to all_tags list
+                    all_tags.append(translations.tags[language].get(tag, tag))
+
         return jsonify({
-            'results': paginated_results,
+            'results': results_data,
             'page': page,
             'limit': limit,
             'total_results': total_results,
             'total_pages': total_pages,
-            'metadata': {'brands': available_brands, 
-                        'min_price': min_overall_price,
-                        'max_price': max_overall_price,
-                        'tags': all_tags}
+            'metadata': {
+                'brands': list(set([item['brand'] for item in results_data])),
+                'min_price': min(item['price'] for item in results_data) if results_data else None,
+                'max_price': max(item['price'] for item in results_data) if results_data else None,
+                'tags': all_tags
+                }
             })
-        # return jsonify({
-        #     'message': 'Search results',
-        #     'data': paginated_results,
-        #     'metadata': {
-        #         'total_results': total_results,
-        #         'total_pages': total_pages,
-        #         'page': page,
-        #         'limit': limit
-        #     }
-        # })
     except Exception as e:
         logging.error(f"Search failed: {str(e)}\n{traceback.format_exc()}")
-        return make_response(jsonify({'error': 'Search failed'}), 400)
+        raise ProcessingError('An error occurred while processing the search request')
 
 @bp.route('/product', methods=['GET'])
 def product():
@@ -277,6 +339,16 @@ def product():
         type: string
         required: false
         description: Language for results (default en).
+      - name: country
+        in: query
+        type: string
+        required: false
+        description: Country for filtering product details.
+      - name: currency
+        in: query
+        type: string
+        required: false
+        description: Currency for filtering product details.
     responses:
       200:
         description: Product details.
@@ -286,20 +358,51 @@ def product():
             result:
               type: object
     """
-    
-    id = request.args.get('id')
-    language = request.args.get('language', default='en')
+    try:
+        product_id = request.args.get('id')
+        language = request.args.get('language', default='en')
+        sort_by = request.args.get('sortBy', type=str)
+        ascending = request.args.get('ascending', default='false')
+        ascending = str_to_bool(ascending)  # Convert to boolean
+        country = request.args.get('country', type=str)
+        currency = request.args.get('currency', type=str)
 
-    if all([i is None for i in [id]]):
-        return make_response(jsonify({'error': 'Missing parameter'}), 400)
+        if not product_id:
+            return make_response(jsonify({'error': 'Product ID is required'}), 400)
 
+        # Define properties
+        properties = ["id_item", "name", "price", "brand", "tags", "img_url"]
+        
+        # Prepare filters using FilterBuilder
+        params = {
+            'country': country,
+            'currency': currency
+        }
+        filters = FilterBuilder.build_filters(params)
 
-    result = retrieve_product_data(image_data_processor.all_images_df, id, language)
-    
-    return jsonify({
-        'result': result
-    })
-       
+        # Retrieve product details using Weaviate
+        result = weaviate_service.get_product_details(
+            properties, product_id, language, sort_by, ascending, filters
+        )
+
+        # Check if the product was found
+        if not result.get('data', {}).get('Get', {}).get(WEVIATE_CLASS_NAME):
+            raise DataNotFoundError('Product not found')
+
+        # Extract product data
+        product_data = result['data']['Get'][WEVIATE_CLASS_NAME][0]
+
+        # Translate fields if necessary
+        if 'tags' in product_data:
+            product_data['tags'] = [translations.tags[language].get(tag, tag) for tag in product_data['tags']]
+
+        return jsonify({
+            'result': product_data
+        })
+    except Exception as e:
+        logging.error(f"Product details retrieval failed: {str(e)}\n{traceback.format_exc()}")
+        raise ProcessingError('An error occurred while retrieving product details')
+
 @bp.route('/most_similar_items', methods=['GET'])
 def most_similar_items():
     """
@@ -312,11 +415,21 @@ def most_similar_items():
         type: string
         required: true
         description: Product ID.
-      - name: threshold
+      - name: top_k
         in: query
         type: integer
         required: false
         description: Number of similar items to retrieve (default 20).
+      - name: country
+        in: query
+        type: string
+        required: false
+        description: Country for filtering similar items.
+      - name: currency
+        in: query
+        type: string
+        required: false
+        description: Currency for filtering similar items.
     responses:
       200:
         description: List of most similar items.
@@ -328,20 +441,41 @@ def most_similar_items():
               items:
                 type: object
     """
-    id = request.args.get('id', type=str)
-    top_k = request.args.get('threshold', default=20, type=int)
+    try:
+        product_id = request.args.get('id')
+        top_k = request.args.get('top_k', default=20, type=int)
+        sort_by = request.args.get('sortBy', type=str)
+        ascending = request.args.get('ascending', default='false')
+        ascending = str_to_bool(ascending)  # Convert to boolean
+        country = request.args.get('country', type=str)
+        currency = request.args.get('currency', type=str)
 
-    if all([i is None for i in [id, top_k]]):
-        return make_response(jsonify({'error': 'Missing parameter'}), 400)
+        if not product_id:
+            return make_response(jsonify({'error': 'Product ID is required'}), 400)
 
-    results = similarity_service.retrieve_most_similar_items(id, top_k)
-    
-    if not results:
-        return make_response(jsonify({'error': 'Id not found'}), 400)
-        
-    return jsonify({
-        'results': results
-    })
+        # Prepare filters using FilterBuilder
+        params = {
+            'country': country,
+            'currency': currency
+        }
+        filters = FilterBuilder.build_filters(params)
+
+        # Retrieve similar items using Weaviate
+        results = weaviate_service.get_similar_items(
+            product_id, top_k, sort_by, ascending, filters
+        )
+
+        if not results:
+            return make_response(jsonify({'error': 'No similar items found or ID not found'}), 404)
+
+        # Extract results data
+        similar_items = results.get('data', {}).get('Get', {}).get(WEVIATE_CLASS_NAME, [])
+
+        return jsonify({
+            'results': similar_items
+        })
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
 
 @bp.route('/image_query_similarity', methods=['GET'])
 def image_query_similarity():
@@ -402,10 +536,15 @@ def brands():
             brand_list:
               type: array
     """
-       
     try:
+        # Retrieve all brands using Weaviate
+        brands_list = weaviate_service.get_all_brands()
+
+        if not brands_list:
+            return make_response(jsonify({'error': 'No brands found'}), 404)
+
         return jsonify({
-            'brand_list': image_data_processor.all_images_df.brand.unique().tolist()
+            'brand_list': brands_list
         })
     except Exception as e:
         logging.error(f"Failed to list brands: {str(e)}\n{traceback.format_exc()}")

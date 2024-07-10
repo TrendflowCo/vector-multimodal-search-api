@@ -2,7 +2,7 @@ import torch
 import numpy as np
 from app.models.clip_models import compute_image_embeddings
 from app.common.utilities import get_img, create_item_data
-from app.config.config import CACHE_DIR
+from app.config import CACHE_DIR
 from joblib import Memory
 
 # Initialize memory cache for storing embeddings

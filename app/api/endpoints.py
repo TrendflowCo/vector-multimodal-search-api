@@ -2,7 +2,7 @@ from flask import Flask
 from flask_caching import Cache
 from flasgger import Swagger
 from flask_cors import CORS
-from app.config.config import CACHE_TYPE, CACHE_DEFAULT_TIMEOUT, SWAGGER_CONFIG
+from app.config import CACHE_TYPE, CACHE_DEFAULT_TIMEOUT, SWAGGER_CONFIG
 from app.api.routes import bp as api_bp
 
 def create_app():

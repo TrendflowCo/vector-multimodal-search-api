@@ -4,12 +4,21 @@ from io import BytesIO
 import pandas as pd
 import re
 import torch
-from googletrans import Translator
+from deep_translator import GoogleTranslator
 
+def str_to_bool(value):
+    """Convert string to a boolean."""
+    if value.lower() in ('true', '1', 'yes'):
+        return True
+    elif value.lower() in ('false', '0', 'no'):
+        return False
+    else:
+        raise ValueError("Invalid literal for boolean: {}".format(value))
+    
 def translate(text, source_language):
-    translator = Translator()
-    translation = translator.translate(text, src=source_language, dest='en')
-    return translation.text
+    translator = GoogleTranslator(source=source_language, target='en')
+    translation = translator.translate(text)
+    return translation
 
 def get_img(image_url):
     """

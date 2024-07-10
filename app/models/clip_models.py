@@ -1,7 +1,7 @@
 import torch
 import clip
 from joblib import Memory
-from app.config.config import CACHE_DIR
+from app.config import CACHE_DIR
 import torch.nn.utils.rnn as r
 import torch
 

@@ -43,3 +43,9 @@ class ExternalAPIError(Error):
     def __init__(self, message="External API error"):
         self.message = message
         super().__init__(self.message)
+
+class ProcessingError(Error):
+    """Raised when there is an error in processing the request"""
+    def __init__(self, message="Error processing the request"):
+        self.message = message
+        super().__init__(self.message)

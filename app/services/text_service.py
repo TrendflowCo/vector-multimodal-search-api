@@ -2,7 +2,7 @@ import torch
 import clip
 from joblib import Memory
 from app.models.clip_models import compute_text_embeddings
-from app.config.config import CACHE_DIR
+from app.config import CACHE_DIR
 from app.common.utilities import get_img
 from app.data.templates import templates, templates_with_adjectives, garment_types
 

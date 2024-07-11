@@ -99,9 +99,10 @@ class WeaviateService:
             "operator": "And",
             "operands": operands
         }).do()
+
         return result
 
-    def get_similar_items(self, product_id, top_k=20, sort_by=None, ascending=True, filters=None):
+    def get_similar_items(self, properties, product_id, top_k=20, sort_by=None, ascending=True, filters=None):
         product_vector = self.client.query.get(
             WEVIATE_CLASS_NAME, ["_additional { vector }"]
         ).with_where({
@@ -118,7 +119,7 @@ class WeaviateService:
         vector = product_vector['data']['Get'][WEVIATE_CLASS_NAME][0]['_additional']['vector']
 
         query_builder = self.client.query.get(
-            WEVIATE_CLASS_NAME, ["id_item", "name", "price", "brand", "tags", "img_url"]
+            WEVIATE_CLASS_NAME, properties
         ).with_near_vector({
             "vector": vector
         }).with_limit(top_k)

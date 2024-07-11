@@ -298,12 +298,12 @@ def search():
         total_pages = (total_results + limit - 1) // limit
 
         # Translate tags if necessary
-        all_tags = []
+        all_tags = set()
         for item in results_data:
             if 'tags' in item:  # Ensure that the 'tags' key exists in the item
                 for tag in item['tags']:
                     # Translate each tag and append to all_tags list
-                    all_tags.append(translations.tags[language].get(tag, tag))
+                    all_tags.add(translations.tags[language].get(tag, tag))
 
         return jsonify({
             'results': results_data,
@@ -315,7 +315,7 @@ def search():
                 'brands': list(set([item['brand'] for item in results_data])),
                 'min_price': min(item['price'] for item in results_data) if results_data else None,
                 'max_price': max(item['price'] for item in results_data) if results_data else None,
-                'tags': all_tags
+                'tags': list(all_tags)
                 }
             })
     except Exception as e:
@@ -371,7 +371,23 @@ def product():
             return make_response(jsonify({'error': 'Product ID is required'}), 400)
 
         # Define properties
-        properties = ["id_item", "name", "price", "brand", "tags", "img_url"]
+        properties = ['id_item',
+         'shop_link',
+         'brand',
+         'name',
+         'desc_1',
+         'desc_2',
+         'category',
+         'price',
+         'old_price',
+         'country',
+         'language',
+         'currency',
+         'discount_rate',
+         'sale',
+         'id_img',
+         'img_url',
+         'tags']
         
         # Prepare filters using FilterBuilder
         params = {
@@ -390,11 +406,16 @@ def product():
             raise DataNotFoundError('Product not found')
 
         # Extract product data
-        product_data = result['data']['Get'][WEVIATE_CLASS_NAME][0]
-
-        # Translate fields if necessary
+        all_results = result['data']['Get'][WEVIATE_CLASS_NAME]
+        product_data = all_results[0]
+        
+        # Extract unique image URLs
+        img_urls = set(item['img_url'] for item in all_results)
+        product_data['img_url'] = list(img_urls)
+        
+        # Translate tags if necessary
         if 'tags' in product_data:
-            product_data['tags'] = [translations.tags[language].get(tag, tag) for tag in product_data['tags']]
+            product_data['tags'] = [translations.tags.get(language, {}).get(tag, tag) for tag in product_data.get('tags', [])]
 
         return jsonify({
             'result': product_data
@@ -459,10 +480,28 @@ def most_similar_items():
             'currency': currency
         }
         filters = FilterBuilder.build_filters(params)
-
+        
+        properties = ['id_item',
+         'shop_link',
+         'brand',
+         'name',
+         'desc_1',
+         'desc_2',
+         'category',
+         'price',
+         'old_price',
+         'country',
+         'language',
+         'currency',
+         'discount_rate',
+         'sale',
+         'id_img',
+         'img_url',
+         'tags']
+        
         # Retrieve similar items using Weaviate
         results = weaviate_service.get_similar_items(
-            product_id, top_k, sort_by, ascending, filters
+            properties, product_id, top_k, sort_by, ascending, filters
         )
 
         if not results:

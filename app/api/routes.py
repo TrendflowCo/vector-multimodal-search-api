@@ -252,6 +252,7 @@ def search():
             'on_sale': on_sale,
             'list_ids': list_ids,
             'country': country,
+            'language': language,
             'currency': currency
         }
         filters = FilterBuilder.build_filters(params)

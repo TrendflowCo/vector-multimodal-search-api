@@ -1,6 +1,5 @@
 import weaviate
 from weaviate.auth import AuthApiKey
-from weaviate.classes.query import MetadataQuery
 from app.services.text_service import TextService
 from app.common.exceptions import DataNotFoundError, InvalidParameterError, ServiceUnavailableError, ProcessingError, AuthenticationError, AuthorizationError
 from app.config import WEVIATE_CLASS_NAME  # Import the WEVIATE_CLASS_NAME at the top of the file

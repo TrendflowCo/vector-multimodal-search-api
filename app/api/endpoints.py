@@ -14,10 +14,9 @@ def create_app():
     # Configure cache
     app.config['CACHE_TYPE'] = CACHE_TYPE
     app.config['CACHE_DEFAULT_TIMEOUT'] = CACHE_DEFAULT_TIMEOUT
-    cache = Cache(app)
     
     # Initialize Swagger
-    swagger = Swagger(app, config=SWAGGER_CONFIG)
+    Swagger(app, config=SWAGGER_CONFIG)
     
     # Enable CORS
     CORS(app)

@@ -1,4 +1,5 @@
 /cache
+/clipapi
 .git
 .gitignore
 .*.md

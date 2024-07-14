@@ -11,7 +11,6 @@ class FilterBuilder:
             filters.append({"path": ["tags"], "operator": "ContainsAny", "valueText": tags_list})
         if params.get('brands'):
             brands_list = [x.lower() for x in params['brands'].replace("'", "").split(',')]
-            breakpoint()
             filters.append({"path": ["brand"], "operator": "ContainsAny", "valueText": brands_list})
         if params.get('category'):
             filters.append({"path": ["category"], "operator": "Equal", "valueText": params['category']})

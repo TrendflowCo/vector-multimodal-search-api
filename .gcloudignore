@@ -1,11 +1,33 @@
-/cache
-/clipapi
+# This file specifies files that are *not* uploaded to Google Cloud Platform
+# using gcloud. It follows the same syntax as .gitignore, with the addition of
+# "#!include" directives (which are not supported by .gitignore).
+
+# .git directory
 .git
-.gitignore
-.*.md
-.*.pyc
-.*.pyo
-.*.pyd
-.pytest_cache
-__pycache__
-./data
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Environment variables
+.env
+
+# Virtual environments
+env/
+venv/
+
+# VSCode settings
+.vscode/
+
+# MacOS specific files
+.DS_Store
+
+# Node modules (if any)
+node_modules/
+
+# Docker files
+.dockerignore
+
+# Cloud Build files
+cloudbuild.yaml
+.gcloudignore

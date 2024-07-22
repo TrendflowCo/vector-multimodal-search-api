@@ -1,12 +1,26 @@
-Dockerfile
-./data/all_brands.csv
+# Ignore Python cache
+__pycache__/
+*.pyc
+
+# Ignore environment variables
+.env
+
+# Ignore virtual environments
+env/
+venv/
+
+# Ignore git directory
 .git
-.gitignore
-.*.md
-.*.pyc
-.*.pyo
-.*.pyd
-.*.onnx
-.*.ttf
-.pytest_cache
-__pycache__
+
+# Ignore VSCode settings
+.vscode/
+
+# Ignore MacOS specific files
+.DS_Store
+
+# Ignore node modules (if any)
+node_modules/
+
+# Ignore Cloud Build files
+cloudbuild.yaml
+.gcloudignore

@@ -1,3 +1,8 @@
-/cache
+cache
 *.json
 *.pyc
+env
+__pycache__
+.DS_Store
+.vscode
+.vscode

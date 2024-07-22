@@ -1,27 +1,30 @@
-# Use the official lightweight Python image.
-# https://hub.docker.com/_/python
-FROM python:3.10-slim
+# Use the official Python image from the Docker Hub
+FROM python:3.8-slim
 
-# Allow statements and log messages to immediately appear in the Knative logs
-ENV PYTHONUNBUFFERED True
+# Set the working directory in the container
+WORKDIR /app
 
-# Copy local code to the container image.
-ENV APP_HOME /app
-WORKDIR $APP_HOME
+# Copy the requirements file into the container
+COPY requirements.txt requirements.txt
+
 # Install Git
-RUN apt-get update
-RUN apt-get -y install git
+RUN apt-get update && apt-get install -y git
+
+# Upgrade pip
 RUN pip install --upgrade pip
 
-
-COPY . ./
-RUN pip install install ftfy regex
+# Install the dependencies
+RUN pip install ftfy regex
 RUN pip install --no-cache-dir -r requirements.txt
-RUN pip install git+https://github.com/openai/CLIP.git
 
-# Run the web service on container startup. Here we use the gunicorn
-# webserver, with one worker process and 8 threads.
-# For environments with multiple CPU cores, increase the number of workers
-# to be equal to the cores available.
-# Timeout is set to 0 to disable the timeouts of the workers to allow Cloud Run to handle instance scaling.
-CMD exec gunicorn --bind :$PORT --workers 3 --threads 8 --timeout 0 main:app
+# Increase timeout and install CLIP
+RUN pip --default-timeout=100 install git+https://github.com/openai/CLIP.git
+
+# Copy the rest of the application code into the container
+COPY . .
+
+# Expose the port that the app runs on
+EXPOSE 8080
+
+# Command to run the application
+CMD ["gunicorn", "--bind", "0.0.0.0:8080", "main:app"]

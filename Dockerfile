@@ -1,4 +1,4 @@
-# Use the official Python image from the Docker Hub
+# Use the official Python image from the Docker Hub with Python 3.10
 FROM python:3.8-slim
 
 # Set the working directory in the container
@@ -26,5 +26,5 @@ COPY . .
 # Expose the port that the app runs on
 EXPOSE 8080
 
-# Command to run the application
-CMD ["gunicorn", "--bind", "0.0.0.0:8080", "main:app"]
+# Command to run the application with increased timeout
+CMD ["gunicorn", "--bind", "0.0.0.0:8080", "main:app", "--timeout", "120"]

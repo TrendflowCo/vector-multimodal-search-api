@@ -12,7 +12,7 @@ steps:
     entrypoint: 'gcloud'
     args: ['run', 'deploy', 'fashion-clip-search', 
           '--cpu', '8',
-          '--memory', '32Gi',
+          '--memory', '16Gi',
           '--image', 'gcr.io/$PROJECT_ID/fashion-clip-search', 
           '--platform', 'managed', 
           '--region', 'us-central1', 

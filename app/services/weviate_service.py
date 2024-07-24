@@ -10,17 +10,15 @@ class WeaviateService:
         self.text_service = TextService()  # Initialize TextService here
 
     def init_client(self):
-        URL = "https://clip-fwrabf88.weaviate.network"
-        APIKEY = "ewBgPsrbT93YNHglKOlSlGoOtqF8Vk1UJEpP"
+        URL="https://ov3facboqmsbtys4cixza.c0.europe-west3.gcp.weaviate.cloud"
+        APIKEY = "PiW22itEdM3YsA2PnxJQQppQgWgLBk9F8LRB"
         try:
             client = weaviate.Client(
                 url=URL,
                 auth_client_secret=AuthApiKey(api_key=APIKEY)
             )
-        except weaviate.AuthenticationError as e:
+        except weaviate.exceptions.AuthenticationFailedException as e:
             raise AuthenticationError("Failed to authenticate with Weaviate")
-        except weaviate.AuthorizationError as e:
-            raise AuthorizationError("Authorization failed for Weaviate access")
         except Exception as e:
             raise ServiceUnavailableError("Weaviate service is currently unavailable")
         return client

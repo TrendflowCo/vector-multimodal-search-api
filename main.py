@@ -486,8 +486,8 @@ def retrieve_filtered_images(images_df, filters):
     if filters.get('tags'):
         list_tags = [x.lower() for x in filters['tags'].replace("'", "").split(',')]
         images_tags_filtered_df = images_tags_df[images_tags_df['value'].str.lower().isin(list_tags)]
-        list_tags_img_ids = images_tags_filtered_df['img_id'].unique().tolist()
-        filtered_items = filtered_items[filtered_items['img_id'].isin(list_tags_img_ids)]
+        list_tags_img_ids = images_tags_filtered_df['img_url'].unique().tolist()
+        filtered_items = filtered_items[filtered_items['images_df'].isin(list_tags_img_ids)]
     
     if filters.get('brands'):
         list_brands = [x.lower() for x in filters['brands'].replace("'", "").split(',')]

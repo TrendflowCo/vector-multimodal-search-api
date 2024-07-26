@@ -22,9 +22,8 @@ bp = Blueprint('api', __name__)
 def get_cached_similar_images(image_url, top_k):
     return weaviate_service.get_similar_items(image_url, top_k)
 @lru_cache(maxsize=None)
-def search_cached(properties, query, page, limit, threshold, search_type, filters):
-    return weaviate_service.search_with_text(properties=properties,
-                                            query_text=query, 
+def search_cached(query, page, limit, threshold, search_type, filters):
+    return weaviate_service.search_with_text(query_text=query, 
                                             threshold=threshold, 
                                             search_type=search_type, 
                                             filters=filters, 
@@ -257,29 +256,8 @@ def search():
         }
         filters = FilterBuilder.build_filters(params)
         
-        # Define properties
-        properties = ['id_item',
-         'shop_link',
-         'brand',
-         'name',
-         'desc_1',
-         'desc_2',
-         'category',
-         'price',
-         'old_price',
-         'country',
-         'language',
-         'currency',
-         'discount_rate',
-         'sale',
-         'id_img',
-         'img_url',
-         'tags']
-    
-        
         # Execute search with Weaviate
         results = weaviate_service.search_with_text(
-            properties=properties,
             query_text=query, 
             threshold=threshold, 
             search_type=search_type, 
@@ -303,8 +281,11 @@ def search():
         for item in results_data:
             if 'tags' in item:  # Ensure that the 'tags' key exists in the item
                 for tag in item['tags']:
-                    # Translate each tag and append to all_tags list
-                    all_tags.add(translations.tags[language].get(tag, tag))
+                    if language and language != 'en':
+                        # Translate each tag and append to all_tags list
+                        all_tags.add(translations.tags[language].get(tag, tag))
+                    else:
+                        all_tags.add(tag)
 
         return jsonify({
             'results': results_data,
@@ -362,44 +343,13 @@ def product():
     try:
         product_id = request.args.get('id')
         language = request.args.get('language', default='en')
-        sort_by = request.args.get('sortBy', type=str)
-        ascending = request.args.get('ascending', default='false')
-        ascending = str_to_bool(ascending)  # Convert to boolean
-        country = request.args.get('country', type=str)
-        currency = request.args.get('currency', type=str)
 
         if not product_id:
             return make_response(jsonify({'error': 'Product ID is required'}), 400)
-
-        # Define properties
-        properties = ['id_item',
-         'shop_link',
-         'brand',
-         'name',
-         'desc_1',
-         'desc_2',
-         'category',
-         'price',
-         'old_price',
-         'country',
-         'language',
-         'currency',
-         'discount_rate',
-         'sale',
-         'id_img',
-         'img_url',
-         'tags']
         
-        # Prepare filters using FilterBuilder
-        params = {
-            'country': country,
-            'currency': currency
-        }
-        filters = FilterBuilder.build_filters(params)
-
         # Retrieve product details using Weaviate
         result = weaviate_service.get_product_details(
-            properties, product_id, language, sort_by, ascending, filters
+            product_id, language
         )
 
         # Check if the product was found
@@ -482,27 +432,9 @@ def most_similar_items():
         }
         filters = FilterBuilder.build_filters(params)
         
-        properties = ['id_item',
-         'shop_link',
-         'brand',
-         'name',
-         'desc_1',
-         'desc_2',
-         'category',
-         'price',
-         'old_price',
-         'country',
-         'language',
-         'currency',
-         'discount_rate',
-         'sale',
-         'id_img',
-         'img_url',
-         'tags']
-        
         # Retrieve similar items using Weaviate
         results = weaviate_service.get_similar_items(
-            properties, product_id, top_k, sort_by, ascending, filters
+            product_id, top_k, sort_by, ascending, filters
         )
 
         if not results:
@@ -579,7 +511,7 @@ def brands():
     try:
         # Retrieve all brands using Weaviate
         brands_list = weaviate_service.get_all_brands()
-
+        
         if not brands_list:
             return make_response(jsonify({'error': 'No brands found'}), 404)
 

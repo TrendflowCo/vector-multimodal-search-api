@@ -2,16 +2,18 @@ import weaviate
 from weaviate.auth import AuthApiKey
 from app.services.text_service import TextService
 from app.common.exceptions import DataNotFoundError, InvalidParameterError, ServiceUnavailableError, ProcessingError, AuthenticationError, AuthorizationError
-from app.config import WEVIATE_CLASS_NAME  # Import the WEVIATE_CLASS_NAME at the top of the file
+from app.config import WEVIATE_CLASS_NAME, PROPERTIES  # Import the WEVIATE_CLASS_NAME at the top of the file
+import os
 
 class WeaviateService:
     def __init__(self):
         self.client = self.init_client()
         self.text_service = TextService()  # Initialize TextService here
-
+        self.properties = PROPERTIES
+        
     def init_client(self):
-        URL="https://ov3facboqmsbtys4cixza.c0.europe-west3.gcp.weaviate.cloud"
-        APIKEY = "PiW22itEdM3YsA2PnxJQQppQgWgLBk9F8LRB"
+        URL = os.environ.get('WEAVIATE_URL')
+        APIKEY = os.environ.get('WEAVIATE_API_KEY')
         try:
             client = weaviate.Client(
                 url=URL,
@@ -28,8 +30,8 @@ class WeaviateService:
             raise InvalidParameterError("Data must be a dictionary")
         self.client.data_object.create(data, WEVIATE_CLASS_NAME)
 
-    def query_data(self, properties, filters=None, limit=100):
-        query_builder = self.client.query.get(WEVIATE_CLASS_NAME, properties)
+    def query_data(self, filters=None, limit=100):
+        query_builder = self.client.query.get(WEVIATE_CLASS_NAME, self.properties)
         if filters:
             query_builder = query_builder.with_where(filters)
         query_builder = query_builder.with_limit(limit)
@@ -38,8 +40,8 @@ class WeaviateService:
         except Exception as e:
             raise ProcessingError(f"Failed to process query: {str(e)}")
 
-    def search_with_text(self, properties, query_text, threshold, search_type="bm25", filters=None, limit=10, offset=0, sort_by=None, ascending=True):
-        query_builder = self.client.query.get(WEVIATE_CLASS_NAME, properties)
+    def search_with_text(self, query_text, threshold, search_type="bm25", filters=None, limit=10, offset=0, sort_by=None, ascending=True):
+        query_builder = self.client.query.get(WEVIATE_CLASS_NAME, self.properties)
         if search_type == "bm25":
             query_builder = query_builder.with_bm25(query=query_text)
         elif search_type == "clip":
@@ -82,16 +84,14 @@ class WeaviateService:
         except Exception as e:
             raise ProcessingError(f"Failed to process query: {str(e)}")
 
-    def get_product_details(self, properties, product_id, language, sort_by, ascending, filters=None):
+    def get_product_details(self, product_id, language):
         operands = [
             {"path": ["id_item"], "operator": "Equal", "valueString": product_id},
             {"path": ["language"], "operator": "Equal", "valueString": language}
         ]
-        if filters:
-            operands.extend(filters)
 
         result = self.client.query.get(
-            WEVIATE_CLASS_NAME, properties
+            WEVIATE_CLASS_NAME, self.properties
         ).with_where({
             "operator": "And",
             "operands": operands
@@ -99,7 +99,7 @@ class WeaviateService:
 
         return result
 
-    def get_similar_items(self, properties, product_id, top_k=20, sort_by=None, ascending=True, filters=None):
+    def get_similar_items(self, product_id, top_k=20, sort_by=None, ascending=True, filters=None):
         product_vector = self.client.query.get(
             WEVIATE_CLASS_NAME, ["_additional { vector }"]
         ).with_where({
@@ -116,7 +116,7 @@ class WeaviateService:
         vector = product_vector['data']['Get'][WEVIATE_CLASS_NAME][0]['_additional']['vector']
 
         query_builder = self.client.query.get(
-            WEVIATE_CLASS_NAME, properties
+            WEVIATE_CLASS_NAME, self.properties
         ).with_near_vector({
             "vector": vector
         }).with_limit(top_k)
@@ -140,7 +140,11 @@ class WeaviateService:
         # Use WEVIATE_CLASS_NAME directly
         result = self.client.query.aggregate(
             WEVIATE_CLASS_NAME
-        ).with_fields(
+        ).with_where({
+            "path": ["country"],
+            "operator": "Equal",
+            "valueString": 'es'
+        }).with_fields(
             "groupedBy { value }"
         ).with_group_by_filter(
             "brand"

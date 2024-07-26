@@ -21,6 +21,8 @@ class FilterBuilder:
             filters.append({"path": ["id"], "operator": "ContainsAny", "valueText": list_ids})
         if params.get('country'):
             filters.append({"path": ["country"], "operator": "Equal", "valueText": params['country']})
+        if params.get('language'):
+            filters.append({"path": ["language"], "operator": "Equal", "valueText": params['language']})
         if params.get('currency'):
             filters.append({"path": ["currency"], "operator": "Equal", "valueText": params['currency']})
         return filters

@@ -1,11 +1,11 @@
 import os
 
-VERSION = '1'
-CACHE_DIR = './cache'
-CACHE_TYPE = 'SimpleCache'
-CACHE_DEFAULT_TIMEOUT = 3600 * 24  # 24 hours
+VERSION = os.environ.get('VERSION', '1')
+CACHE_DIR = os.environ.get('CACHE_DIR', './cache')
+CACHE_TYPE = os.environ.get('CACHE_TYPE', 'SimpleCache')
+CACHE_DEFAULT_TIMEOUT = int(os.environ.get('CACHE_DEFAULT_TIMEOUT', 86400))
 
-WEVIATE_CLASS_NAME = 'Clipfeaturesnew'
+WEVIATE_CLASS_NAME = os.environ.get('WEAVIATE_CLASS_NAME', 'Clipfeaturesnew')
 
 SWAGGER_CONFIG = {
     "headers": [],
@@ -22,5 +22,7 @@ SWAGGER_CONFIG = {
     "specs_route": "/swagger/",
 }
 
-TAGS_THRESHOLD = 0.24
-MAX_K = 500
+TAGS_THRESHOLD = float(os.environ.get('TAGS_THRESHOLD', 0.24))
+MAX_K = int(os.environ.get('MAX_K', 500))
+
+PROPERTIES = os.getenv('PROPERTIES', '').split(',')

@@ -8,7 +8,7 @@ from app.common.exceptions import InvalidParameterError, DataNotFoundError, Proc
 from werkzeug.exceptions import HTTPException
 from app.localization import translations
 from app.common.utilities import str_to_bool
-from app.config import WEVIATE_CLASS_NAME  # Import the WEVIATE_CLASS_NAME
+from app.config import WEAVIATE_CLASS_NAME
 from app.data.filter_builder import FilterBuilder
 
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -257,7 +257,7 @@ def search():
         filters = FilterBuilder.build_filters(params)
         
         # Execute search with Weaviate
-        results = weaviate_service.search_with_text(
+        results_data, total_results = weaviate_service.search_with_text(
             query_text=query, 
             threshold=threshold, 
             search_type=search_type, 
@@ -269,11 +269,9 @@ def search():
         )
 
         # Process results for response
-        results_data = results.get('data', {}).get('Get', {}).get(WEVIATE_CLASS_NAME, [])
         if not results_data:
             return make_response(jsonify({'error': 'No results found'}), 404) 
         
-        total_results = len(results_data)  # This might need adjustment based on actual Weaviate response
         total_pages = (total_results + limit - 1) // limit
 
         # Translate tags if necessary
@@ -353,11 +351,11 @@ def product():
         )
 
         # Check if the product was found
-        if not result.get('data', {}).get('Get', {}).get(WEVIATE_CLASS_NAME):
+        if not result.get('data', {}).get('Get', {}).get(WEAVIATE_CLASS_NAME):
             raise DataNotFoundError('Product not found')
 
         # Extract product data
-        all_results = result['data']['Get'][WEVIATE_CLASS_NAME]
+        all_results = result['data']['Get'][WEAVIATE_CLASS_NAME]
         product_data = all_results[0]
         
         # Extract unique image URLs
@@ -441,7 +439,7 @@ def most_similar_items():
             return make_response(jsonify({'error': 'No similar items found or ID not found'}), 404)
 
         # Extract results data
-        similar_items = results.get('data', {}).get('Get', {}).get(WEVIATE_CLASS_NAME, [])
+        similar_items = results.get('data', {}).get('Get', {}).get(WEAVIATE_CLASS_NAME, [])
 
         return jsonify({
             'results': similar_items

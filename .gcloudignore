@@ -20,8 +20,6 @@ venv/
 # MacOS specific files
 .DS_Store
 
-# Node modules (if any)
-node_modules/
 
 # Docker files
 .dockerignore

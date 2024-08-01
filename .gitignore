@@ -1,7 +1,7 @@
 cache
 *.json
 *.pyc
-.env
+# .env
 env
 weaviatenv
 __pycache__

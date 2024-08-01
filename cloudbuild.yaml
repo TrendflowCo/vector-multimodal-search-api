@@ -16,8 +16,10 @@ steps:
           '--image', 'gcr.io/$PROJECT_ID/fashion-clip-search', 
           '--platform', 'managed', 
           '--region', 'us-central1', 
-          '--allow-unauthenticated']
+          '--allow-unauthenticated',
+          '--min-instances', '3'
+          ]  
+
 
 images:
   - 'gcr.io/$PROJECT_ID/fashion-clip-search'
-

@@ -8,7 +8,7 @@ from app.common.exceptions import InvalidParameterError, DataNotFoundError, Proc
 from werkzeug.exceptions import HTTPException
 from app.localization import translations
 from app.common.utilities import str_to_bool
-from app.config import WEAVIATE_CLASS_NAME
+from app.config import SEARCH_THRESHOLD
 from app.data.filter_builder import FilterBuilder
 
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -225,7 +225,7 @@ def search():
         sort_by = request.args.get('sortBy', type=str)
         ascending = request.args.get('ascending', default='false')
         ascending = str_to_bool(ascending)  # Convert to boolean
-        threshold = request.args.get('threshold', default=0.8, type=float)  # Default threshold for vector search
+        threshold = request.args.get('threshold', default=SEARCH_THRESHOLD, type=float)  # Default threshold for vector search
         max_price = request.args.get('maxPrice', type=int)
         min_price = request.args.get('minPrice', type=int)
         category = request.args.get('category', type=str)
@@ -235,9 +235,9 @@ def search():
         brands = request.args.get('brands', type=str)
         list_ids = request.args.get('ids', type=str)
         search_type = request.args.get('search_type', default='clip', type=str)
-        country = request.args.get('country', default='es', type=str)
-        language = request.args.get('language', default='es', type=str)
-        currency = request.args.get('currency', type=str)
+        country = request.args.get('country', default='us', type=str)
+        language = request.args.get('language', default='en', type=str)
+        currency = request.args.get('currency', default='USD', type=str)
 
         if not query:
             return make_response(jsonify({'error': 'Query parameter is required'}), 400)
@@ -323,17 +323,17 @@ def product():
         in: query
         type: string
         required: false
-        description: Country for filtering product details.
+        description: Country for filtering products.
       - name: currency
         in: query
         type: string
         required: false
-        description: Currency for filtering product details.
+        description: Currency for filtering products.
     responses:
       200:
         description: Product details.
         schema:
-          type: object  # Define your result structure here
+          type: object
           properties:
             result:
               type: object
@@ -341,26 +341,29 @@ def product():
     try:
         product_id = request.args.get('id')
         language = request.args.get('language', default='en')
+        country = request.args.get('country', default='us', type=str)
+        currency = request.args.get('currency', default='USD', type=str)
 
         if not product_id:
             return make_response(jsonify({'error': 'Product ID is required'}), 400)
         
+        params = {
+            'language': language,
+            'country': country,
+            'currency': currency
+        }
+        filters = FilterBuilder.build_filters(params)
+        
         # Retrieve product details using Weaviate
-        result = weaviate_service.get_product_details(
-            product_id, language
-        )
+        product_data = weaviate_service.get_product_details(product_id, filters)
 
         # Check if the product was found
-        if not result.get('data', {}).get('Get', {}).get(WEAVIATE_CLASS_NAME):
+        if not product_data:
             raise DataNotFoundError('Product not found')
 
-        # Extract product data
-        all_results = result['data']['Get'][WEAVIATE_CLASS_NAME]
-        product_data = all_results[0]
-        
         # Extract unique image URLs
-        img_urls = set(item['img_url'] for item in all_results)
-        product_data['img_url'] = list(img_urls)
+        # img_urls = set(item['img_url'] for item in product_data.get('images', []))
+        # product_data['img_url'] = list(img_urls)
         
         # Translate tags if necessary
         if 'tags' in product_data:
@@ -395,6 +398,11 @@ def most_similar_items():
         type: string
         required: false
         description: Country for filtering similar items.
+      - name: language
+        in: query
+        type: string
+        required: false
+        description: Languge for filtering similar items.
       - name: currency
         in: query
         type: string
@@ -417,8 +425,9 @@ def most_similar_items():
         sort_by = request.args.get('sortBy', type=str)
         ascending = request.args.get('ascending', default='false')
         ascending = str_to_bool(ascending)  # Convert to boolean
-        country = request.args.get('country', type=str)
-        currency = request.args.get('currency', type=str)
+        country = request.args.get('country', default='us', type=str)
+        language = request.args.get('language', default='en', type=str)
+        currency = request.args.get('currency', default='USD', type=str)
 
         if not product_id:
             return make_response(jsonify({'error': 'Product ID is required'}), 400)
@@ -426,6 +435,7 @@ def most_similar_items():
         # Prepare filters using FilterBuilder
         params = {
             'country': country,
+            'language': language,
             'currency': currency
         }
         filters = FilterBuilder.build_filters(params)
@@ -439,7 +449,7 @@ def most_similar_items():
             return make_response(jsonify({'error': 'No similar items found or ID not found'}), 404)
 
         # Extract results data
-        similar_items = results.get('data', {}).get('Get', {}).get(WEAVIATE_CLASS_NAME, [])
+        similar_items = results
 
         return jsonify({
             'results': similar_items

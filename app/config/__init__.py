@@ -5,9 +5,6 @@ CACHE_DIR =os.getenv('CACHE_DIR', './cache')
 CACHE_TYPE =os.getenv('CACHE_TYPE', 'SimpleCache')
 CACHE_DEFAULT_TIMEOUT = int(os.getenv('CACHE_DEFAULT_TIMEOUT', 86400))
 
-WEAVIATE_CLASS_NAME =os.getenv('WEAVIATE_CLASS_NAME', 'Clipfeaturesfull')
-print('WEAVIATE_CLASS_NAME', WEAVIATE_CLASS_NAME)
-
 SWAGGER_CONFIG = {
     "headers": [],
     "specs": [
@@ -23,7 +20,16 @@ SWAGGER_CONFIG = {
     "specs_route": "/swagger/",
 }
 
+
+WEAVIATE_CLASS_NAME_ITEMS = os.getenv('WEAVIATE_CLASS_NAME_ITEMS')
+WEAVIATE_CLASS_NAME_IMAGES = os.getenv('WEAVIATE_CLASS_NAME_IMAGES')
+WEAVIATE_CLASS_NAME =os.getenv('WEAVIATE_CLASS_NAME', 'Clipfeaturesfull')
+print('WEAVIATE_CLASS_NAME', WEAVIATE_CLASS_NAME)
+
 TAGS_THRESHOLD = float(os.getenv('TAGS_THRESHOLD', 0.24))
 MAX_K = int(os.getenv('MAX_K', 500))
+SEARCH_THRESHOLD = float(os.getenv('SEARCH_THRESHOLD', 0.5))
 
 PROPERTIES = os.getenv('PROPERTIES', '').split(',')
+WEAVIATE_URL = os.getenv('WEAVIATE_URL')
+WEAVIATE_API_KEY = os.getenv('WEAVIATE_API_KEY')

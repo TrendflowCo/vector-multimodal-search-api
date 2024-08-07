@@ -7,7 +7,7 @@ from app.services.weviate_service import WeaviateService
 from app.common.exceptions import InvalidParameterError, DataNotFoundError, ProcessingError
 from werkzeug.exceptions import HTTPException
 from app.localization import translations
-from app.common.utilities import str_to_bool
+from app.common.utilities import str_to_bool, translate
 from app.config import SEARCH_THRESHOLD
 from app.data.filter_builder import FilterBuilder
 
@@ -242,6 +242,18 @@ def search():
         if not query:
             return make_response(jsonify({'error': 'Query parameter is required'}), 400)
 
+        # Translate the query if not in English
+        if language != 'en':
+            query = translate(query, language)
+
+        # Translate the tags if not in English
+        if tags:
+            if language != 'en':
+                # Create an inverse dictionary for the current language
+                inverse_tags = {v: k for k, v in translations.tags[language].items()}
+                # Translate tags from the given language to English
+                tags = ','.join([inverse_tags.get(tag, tag) for tag in tags.split(',')])
+
         params = {
             'min_price': min_price,
             'max_price': max_price,
@@ -254,8 +266,9 @@ def search():
             'language': language,
             'currency': currency
         }
-        filters = FilterBuilder.build_filters(params)
         
+        filters = FilterBuilder.build_filters(params)
+
         # Execute search with Weaviate
         results_data, total_results = weaviate_service.search_with_text(
             query_text=query, 

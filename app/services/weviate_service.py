@@ -106,7 +106,6 @@ class WeaviateService:
             return items, total_results
 
         except Exception as e:
-            breakpoint()
             raise ProcessingError(f"Failed to process query: {str(e)}")
 
     def get_product_details(self, product_id, filters=None):

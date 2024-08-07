@@ -15,7 +15,7 @@ class FilterBuilder:
         if params.get('category'):
             filters.append({"path": ["category"], "operator": "Equal", "valueText": params['category']})
         if params.get('on_sale'):
-            filters.append({"path": ["onSale"], "operator": "Equal", "valueBoolean": params['on_sale']})
+            filters.append({"path": ["sale"], "operator": "Equal", "valueBoolean": params['on_sale']})
         if params.get('list_ids'):
             list_ids = params['list_ids'].replace("'", "").split(',')
             filters.append({"path": ["id"], "operator": "ContainsAny", "valueText": list_ids})

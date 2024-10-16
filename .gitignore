@@ -7,7 +7,7 @@ __pycache__
 .vscode
 .vscode
 .env
-env/
+env
 weaviatenv
 *__init__.py
 .ipynb_checkpoints

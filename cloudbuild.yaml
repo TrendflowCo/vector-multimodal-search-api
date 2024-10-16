@@ -1,23 +1,36 @@
 steps:
   # Step 1: Build the Docker image
   - name: 'gcr.io/cloud-builders/docker'
-    args: ['build', '-t', 'gcr.io/$PROJECT_ID/fashion-clip-search', '.']
-  
+    args: ['build', '-t', 'gcr.io/trendflow-429722/fashion-clip-search', '.']
+
   # Step 2: Push the Docker image to Google Container Registry
   - name: 'gcr.io/cloud-builders/docker'
-    args: ['push', 'gcr.io/$PROJECT_ID/fashion-clip-search']
+    args: ['push', 'gcr.io/trendflow-429722/fashion-clip-search']
 
-  # Step 3: Deploy the image to Cloud Run
-  - name: 'gcr.io/cloud-builders/gcloud'
-    entrypoint: 'gcloud'
-    args: ['run', 'deploy', 'fashion-clip-search', 
-          '--cpu', '8',
-          '--memory', '32Gi',
-          '--image', 'gcr.io/$PROJECT_ID/fashion-clip-search', 
-          '--platform', 'managed', 
-          '--region', 'us-central1', 
-          '--allow-unauthenticated']
+  # Step 3: Deploy to Cloud Run using the newly built image
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        gcloud run deploy fashion-clip-search \
+          --image gcr.io/trendflow-429722/fashion-clip-search \
+          --platform managed \
+          --region us-central1 \
+          --set-env-vars "SERVICE_ACCOUNT_NAME=908136706043-compute@developer.gserviceaccount.com" \
+          --allow-unauthenticated \
+          --concurrency 8 \
+          --timeout 120s \
+          --memory 8Gi \
+          --cpu 2 \
+          --min-instances 0 \
+          --max-instances 2 \
+          --port 8080 \
+          --labels "cloud.googleapis.com/location=us-central1,client.knative.dev/nonce=yedvvtfvkb"
 
+timeout: "1200s"
+
+# Define the images to be cached
 images:
-  - 'gcr.io/$PROJECT_ID/fashion-clip-search'
+  - 'gcr.io/trendflow-429722/fashion-clip-search'
 

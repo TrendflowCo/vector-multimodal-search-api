@@ -9,8 +9,6 @@
 __pycache__/
 *.pyc
 
-# Environment variables
-.env
 
 # Virtual environments
 env/
@@ -22,8 +20,6 @@ venv/
 # MacOS specific files
 .DS_Store
 
-# Node modules (if any)
-node_modules/
 
 # Docker files
 .dockerignore

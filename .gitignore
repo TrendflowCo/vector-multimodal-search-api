@@ -1,9 +1,13 @@
 cache
 *.json
 *.pyc
-env
-weaviatenv
+*.csv
 __pycache__
 .DS_Store
 .vscode
 .vscode
+.env
+env
+weaviatenv
+*__init__.py
+.ipynb_checkpoints

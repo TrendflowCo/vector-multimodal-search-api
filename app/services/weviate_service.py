@@ -63,7 +63,7 @@ class WeaviateService:
                 'distance': threshold,
             }
             query_builder = query_builder.with_near_vector(vector_search)
-            # count_query = count_query.with_near_vector(vector_search)
+
         elif search_type == "hybrid":
             query_vector = self.text_service.get_text_embeddings(query_text)
             hybrid_search = {
@@ -73,20 +73,18 @@ class WeaviateService:
                 'distance': threshold,
             }
             query_builder = query_builder.hybrid(hybrid_search)
-            # count_query = count_query.hybrid(hybrid_search)
             
-        query_builder = query_builder.\
-                            with_limit(limit).\
-                            with_offset(offset).\
-                            with_additional(['id', 'distance'])
-
         if filters:
             filter_condition = {
                 "operator": "And",
                 "operands": filters
             }
             query_builder = query_builder.with_where(filter_condition)
-            # count_query = count_query.with_where(filter_condition)
+
+        query_builder = query_builder.\
+                            with_limit(limit).\
+                            with_offset(offset).\
+                            with_additional(['id', 'distance'])
 
         if sort_by:
             order = 'asc' if ascending else 'desc'
@@ -128,24 +126,11 @@ class WeaviateService:
             if items_result is None:
                 return None
 
-            # # Query Clipfeatures_images
-            # images_query = (
-            #     self.client.query.get(self.images_class, ["id_img", "img_url", "tags"])
-            #     .with_where({
-            #         "path": ["id_item"],
-            #         "operator": "Equal",
-            #         "valueString": product_id
-            #     })
-            # )
-            # images_result = images_query.do()
-            # if images_result is None:
-            #     images_result = {'data': {'Get': {self.images_class: []}}}
-
             # Combine results
             product_details = items_result.get('data', {}).get('Get', {}).get(self.items_class, [])
             if product_details:
                 product_details = product_details[0]
-                product_details['img_url'] = [product_details['img_url']] #TODO: Add images
+                product_details['img_urls'] = product_details['img_urls']
                 # product_details['images'] = images_result.get('data', {}).get('Get', {}).get(self.images_class, [])
             return product_details
         except weaviate.exceptions.WeaviateTimeoutError as e:

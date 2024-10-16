@@ -262,9 +262,9 @@ def search():
             'category': category,
             'on_sale': on_sale,
             'list_ids': list_ids,
-            'country': country,
-            'language': language,
-            'currency': currency
+            # 'country': country,
+            # 'language': language,
+            # 'currency': currency
         }
         
         filters = FilterBuilder.build_filters(params)
@@ -361,9 +361,9 @@ def product():
             return make_response(jsonify({'error': 'Product ID is required'}), 400)
         
         params = {
-            'language': language,
-            'country': country,
-            'currency': currency
+            # 'language': language,
+            # 'country': country,
+            # 'currency': currency
         }
         filters = FilterBuilder.build_filters(params)
         
@@ -438,8 +438,8 @@ def most_similar_items():
         sort_by = request.args.get('sortBy', type=str)
         ascending = request.args.get('ascending', default='false')
         ascending = str_to_bool(ascending)  # Convert to boolean
-        country = request.args.get('country', default='us', type=str)
         language = request.args.get('language', default='en', type=str)
+        country = request.args.get('country', default='us', type=str)
         currency = request.args.get('currency', default='USD', type=str)
 
         if not product_id:
@@ -447,9 +447,9 @@ def most_similar_items():
 
         # Prepare filters using FilterBuilder
         params = {
-            'country': country,
-            'language': language,
-            'currency': currency
+            # 'language': language,
+            # 'country': country,
+            # 'currency': currency
         }
         filters = FilterBuilder.build_filters(params)
         

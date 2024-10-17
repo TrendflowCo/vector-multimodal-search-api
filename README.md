@@ -1,94 +1,75 @@
-# Fashion CLIP Search
+# TrendFlow API 🔍👗
 
-A powerful and efficient fashion search engine powered by CLIP (Contrastive Language-Image Pre-training) technology.
+Private API powering TrendFlow, the cutting-edge fashion multimodal search platform.
 
-## 🚀 Features
+## 🌟 Key Features
 
-- Text-based fashion item search
-- Image similarity search
+- Text and image-based fashion search
 - Multi-language support
-- Brand filtering
-- Price range filtering
-- Category-based search
-- Sale item filtering
+- Advanced filtering (brand, price, category, sale status)
+- Real-time data ingestion from BigQuery
+- High-performance vector search with Weaviate
+- Secure API key authentication
+- Rate limiting for API protection
 
-## 🛠️ Technologies Used
+## 🛠️ Tech Stack
 
 - Python 3.11
 - Flask
 - CLIP (OpenAI)
 - Weaviate
+- Google BigQuery
 - Docker
-- Google Cloud Platform
+- Flask-HTTPAuth
+- Flask-Limiter
 
-## 🏗️ Project Structure
-
-The project is organized into several key components:
-
-- `app/`: Main application directory
-  - `api/`: API endpoints and routes
-  - `common/`: Utility functions
-  - `config/`: Configuration settings
-  - `data/`: Data-related modules
-  - `localization/`: Internationalization support
-  - `models/`: CLIP models and related functions
-  - `services/`: Business logic and services
-
-- `notebooks/`: Jupyter notebooks for testing and development
-- `tests/`: Unit tests
-
-## 🚀 Getting Started
+## 🚀 Quick Start (For Development)
 
 1. Clone the repository
-2. Install dependencies:
-   ```
-   pip install -r requirements.txt
-   ```
-3. Set up environment variables:
-   - Copy `.env-example` to `.env`
-   - Fill in your specific values in the `.env` file
-4. Run the application:
-   ```
-   python main.py
-   ```
+2. Install dependencies: `pip install -r requirements.txt`
+3. Generate API key: `python generate_api_key.py`
+4. Set up environment variables: Copy `.env-example` to `.env` and fill in values, including the generated API key
+5. Run the app: `python main.py`
 
-## 🌍 Environment Variables
+## 🐳 Deployment
 
-The project uses environment variables for configuration. A `.env-example` file is provided with all the necessary variables. Make sure to copy this file to `.env` and update the values before running the application.
-
-## 🐳 Docker Support
-
-The project includes Docker support for easy deployment. Build and run the Docker image using:
-
+```bash
+docker build -t trendflow-api .
+docker run -p 8080:8080 trendflow-api
 ```
-docker build -t fashion-clip-search .
-docker run -p 8080:8080 fashion-clip-search
-```
-
-## 🚀 Deployment
-
-The project is set up for deployment on Google Cloud Platform using Cloud Build and Cloud Run. Refer to the `cloudbuild.yaml` file for deployment configuration.
 
 ## 🧪 Testing
 
-Run the unit tests using:
-
-```
-python -m unittest discover tests
-```
+Run tests: `python -m unittest discover tests`
 
 ## 📚 API Documentation
 
-API documentation is available using Swagger. Access the Swagger UI at `/swagger/` when running the application.
+Internal Swagger UI available at `/swagger/` (requires authentication)
 
 ## 🌐 Internationalization
 
-The project supports multiple languages. Translations are managed in the `app/localization/translations.py` file.
+Manage translations in `app/localization/translations.py`
 
-## 🤝 Contributing
+## 🔒 Security
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+- API key required for all endpoints
+  - Include in requests as: `Authorization: Bearer YOUR_API_KEY`
+- Rate limiting enforced:
+  - Search: 10 requests per minute
+  - Product details: 20 requests per minute
+  - Similar items: 10 requests per minute
+  - Brands list: 5 requests per minute
+  - Data ingestion: 2 requests per hour
+- Data encryption in transit (HTTPS recommended in production)
 
-## 📄 License
+## 📈 Monitoring
 
-This project is licensed under the MIT License.
+Prometheus metrics available at `/metrics` endpoint (requires authentication)
+
+## 🤝 Support
+
+For issues or feature requests, please contact the TrendFlow development team.
+
+## ⚠️ Disclaimer
+
+This is a private API. Unauthorized access or use is strictly prohibited.

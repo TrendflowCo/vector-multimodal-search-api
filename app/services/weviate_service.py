@@ -208,3 +208,14 @@ class WeaviateService:
             raise ProcessingError("Timeout occurred while retrieving brands: " + str(e))
         except Exception as e:
             raise ProcessingError(f"Failed to retrieve brands: {str(e)}")
+
+    def batch_import_data(self, data_objects, batch_size=100):
+        with self.client.batch as batch:
+            for i, obj in enumerate(data_objects):
+                batch.add_data_object(
+                    data_object=obj,
+                    class_name="Product"
+                )
+                if i % batch_size == 0:
+                    batch.flush()
+        batch.flush()

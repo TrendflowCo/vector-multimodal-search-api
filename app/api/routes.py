@@ -10,6 +10,7 @@ from app.localization import translations
 from app.common.utilities import str_to_bool, translate
 from app.config import SEARCH_THRESHOLD
 from app.data.filter_builder import FilterBuilder
+from app.services.ingest_service import IngestService
 
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -542,3 +543,32 @@ def brands():
     except Exception as e:
         logging.error(f"Failed to list brands: {str(e)}\n{traceback.format_exc()}")
         return make_response(jsonify({'error': 'Failed to list brands'}), 400)
+
+@bp.route('/ingest', methods=['POST'])
+def ingest_data():
+    """
+    Ingest data into Weaviate from BigQuery.
+
+    ---
+    responses:
+      200:
+        description: Data ingestion successful.
+        schema:
+          type: object
+          properties:
+            message:
+              type: string
+            ingested_count:
+              type: integer
+    """
+    try:
+        ingest_service = IngestService()
+        ingested_count = ingest_service.ingest_data()
+
+        return jsonify({
+            'message': 'Data ingestion successful',
+            'ingested_count': ingested_count
+        }), 200
+    except Exception as e:
+        logging.error(f"Error during data ingestion: {str(e)}\n{traceback.format_exc()}")
+        return jsonify({'error': 'An error occurred during data ingestion'}), 500

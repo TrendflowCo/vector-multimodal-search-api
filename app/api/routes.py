@@ -11,6 +11,7 @@ from app.common.utilities import str_to_bool, translate
 from app.config import SEARCH_THRESHOLD
 from app.data.filter_builder import FilterBuilder
 from app.services.ingest_service import IngestService
+from app.security import auth, limiter
 
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -84,6 +85,8 @@ def get_similar_images():
         raise ProcessingError('An error occurred while processing the request for similar images')
 
 @bp.route('/search', methods=['GET'])
+@auth.login_required
+@limiter.limit("100000 per minute")
 def search():
     """
     Search for products based on various filters.
@@ -317,6 +320,8 @@ def search():
         raise ProcessingError('An error occurred while processing the search request')
 
 @bp.route('/product', methods=['GET'])
+@auth.login_required
+@limiter.limit("100000 per minute")
 def product():
     """
     Get product details by ID.
@@ -391,6 +396,8 @@ def product():
         raise ProcessingError('An error occurred while retrieving product details')
 
 @bp.route('/most_similar_items', methods=['GET'])
+@auth.login_required
+@limiter.limit("100000 per minute")
 def most_similar_items():
     """
     Get a list of most similar items to a given product.
@@ -515,6 +522,8 @@ def image_query_similarity():
     })
 
 @bp.route('/brands_list', methods=['GET'])
+@auth.login_required
+@limiter.limit("100000 per minute")
 def brands():
     """
     Get the list of all brands in catalogue.
@@ -545,6 +554,8 @@ def brands():
         return make_response(jsonify({'error': 'Failed to list brands'}), 400)
 
 @bp.route('/ingest', methods=['POST'])
+@auth.login_required
+@limiter.limit("100000 per minute")
 def ingest_data():
     """
     Ingest data into Weaviate from BigQuery.

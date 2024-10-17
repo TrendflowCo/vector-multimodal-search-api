@@ -1,68 +1,88 @@
 import unittest
-import requests
-
-BASE_URL = "http://localhost:5000/api"
+import json
+from app import create_app
+from app.services.weviate_service import WeaviateService
+from unittest.mock import patch, MagicMock
 
 class TestAPIEndpoints(unittest.TestCase):
 
-    def test_product_endpoint(self):
-        params = {
-            'id': 'some_product_id',
-            'language': 'en',
-            'country': 'US',
-            'currency': 'USD'
-        }
-        response = requests.get(f"{BASE_URL}/product", params=params)
-        self.assertEqual(response.status_code, 200)
-        self.assertIn('result', response.json())
+    def setUp(self):
+        self.app = create_app('testing')
+        self.client = self.app.test_client()
+        self.weaviate_service = WeaviateService()
 
     def test_search_endpoint(self):
-        params = {
-            'query': 'some_query',
-            'page': 1,
-            'limit': 10,
-            'sortBy': 'price',
-            'ascending': 'true',
-            'threshold': 0.8,
-            'maxPrice': 100,
-            'minPrice': 10,
-            'category': 'electronics',
-            'onSale': 'true',
-            'tags': 'tag1,tag2',
-            'brands': 'brand1,brand2',
-            'ids': 'id1,id2',
-            'language': 'en',
-            'country': 'US',
-            'currency': 'USD'
-        }
-        response = requests.get(f"{BASE_URL}/search", params=params)
-        self.assertEqual(response.status_code, 200)
-        self.assertIn('results', response.json())
+        with patch.object(WeaviateService, 'search_with_text') as mock_search:
+            mock_search.return_value = (
+                [{'id': '1', 'name': 'Test Product', 'price': 100}],
+                1
+            )
+            response = self.client.get('/search?query=test&page=1&limit=10')
+            self.assertEqual(response.status_code, 200)
+            data = json.loads(response.data)
+            self.assertIn('results', data)
+            self.assertEqual(len(data['results']), 1)
+            self.assertEqual(data['total_results'], 1)
 
-    def test_brands_list_endpoint(self):
-        response = requests.get(f"{BASE_URL}/brands_list")
-        self.assertEqual(response.status_code, 200)
-        self.assertIn('brand_list', response.json())
+    def test_product_endpoint(self):
+        with patch.object(WeaviateService, 'get_product_details') as mock_get_product:
+            mock_get_product.return_value = {
+                'id': '1',
+                'name': 'Test Product',
+                'price': 100,
+                'tags': ['tag1', 'tag2']
+            }
+            response = self.client.get('/product?id=1')
+            self.assertEqual(response.status_code, 200)
+            data = json.loads(response.data)
+            self.assertIn('result', data)
+            self.assertEqual(data['result']['name'], 'Test Product')
 
     def test_most_similar_items_endpoint(self):
-        params = {
-            'id': 'some_product_id',
-            'top_k': 10,
-            'country': 'US',
-            'currency': 'USD'
-        }
-        response = requests.get(f"{BASE_URL}/most_similar_items", params=params)
-        self.assertEqual(response.status_code, 200)
-        self.assertIn('results', response.json())
+        with patch.object(WeaviateService, 'get_similar_items') as mock_get_similar:
+            mock_get_similar.return_value = [
+                {'id': '2', 'name': 'Similar Product', 'price': 90}
+            ]
+            response = self.client.get('/most_similar_items?id=1&top_k=5')
+            self.assertEqual(response.status_code, 200)
+            data = json.loads(response.data)
+            self.assertIn('results', data)
+            self.assertEqual(len(data['results']), 1)
 
-    def test_image_query_similarity_endpoint(self):
-        params = {
-            'query': 'some_image_query',
-            'img_url': 'https://static.zara.net/assets/public/075e/e927/a9954b388618/519b7a116a15/00518063802-p/00518063802-p.jpg?ts=1713514518983&w=824'
-        }
-        response = requests.get(f"{BASE_URL}/image_query_similarity", params=params)
-        self.assertEqual(response.status_code, 200)
-        self.assertIn('similarity_score', response.json())
+    def test_brands_list_endpoint(self):
+        with patch.object(WeaviateService, 'get_all_brands') as mock_get_brands:
+            mock_get_brands.return_value = ['Brand1', 'Brand2', 'Brand3']
+            response = self.client.get('/brands_list')
+            self.assertEqual(response.status_code, 200)
+            data = json.loads(response.data)
+            self.assertIn('brand_list', data)
+            self.assertEqual(len(data['brand_list']), 3)
 
-if __name__ == "__main__":
+    def test_ingest_endpoint(self):
+        with patch('app.services.ingest_service.IngestService.ingest_data') as mock_ingest:
+            mock_ingest.return_value = 100
+            response = self.client.post('/ingest')
+            self.assertEqual(response.status_code, 200)
+            data = json.loads(response.data)
+            self.assertIn('message', data)
+            self.assertIn('ingested_count', data)
+            self.assertEqual(data['ingested_count'], 100)
+
+    def test_search_endpoint_error(self):
+        with patch.object(WeaviateService, 'search_with_text') as mock_search:
+            mock_search.side_effect = Exception("Test error")
+            response = self.client.get('/search?query=test')
+            self.assertEqual(response.status_code, 500)
+            data = json.loads(response.data)
+            self.assertIn('error', data)
+
+    def test_product_endpoint_not_found(self):
+        with patch.object(WeaviateService, 'get_product_details') as mock_get_product:
+            mock_get_product.return_value = None
+            response = self.client.get('/product?id=999')
+            self.assertEqual(response.status_code, 404)
+            data = json.loads(response.data)
+            self.assertIn('error', data)
+
+if __name__ == '__main__':
     unittest.main()

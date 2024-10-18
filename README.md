@@ -52,19 +52,40 @@ Manage translations in `app/localization/translations.py`
 
 ## 🔒 Security
 
-- API key required for all endpoints
-  - Include in requests as: `Authorization: Bearer YOUR_API_KEY`
-- Rate limiting enforced:
-  - Search: 10 requests per minute
-  - Product details: 20 requests per minute
-  - Similar items: 10 requests per minute
-  - Brands list: 5 requests per minute
-  - Data ingestion: 2 requests per hour
-- Data encryption in transit (HTTPS recommended in production)
+API key required for all endpoints. Include in requests as:
+```
+Authorization: Bearer YOUR_API_KEY
+```
 
-## 📈 Monitoring
+## 📡 Endpoints
 
-Prometheus metrics available at `/metrics` endpoint (requires authentication)
+1. **Search** - `/search` (GET)
+   - Search for products based on various filters
+   - Parameters: query, imageUrl, threshold, maxPrice, minPrice, category, onSale, tags, brands, ids, language, page, limit, sortBy, ascending, search_type, country, currency
+
+2. **Product Details** - `/product` (GET)
+   - Get product details by ID
+   - Parameters: id, language, country, currency
+
+3. **Similar Items** - `/most_similar_items` (GET)
+   - Get a list of most similar items to a given product
+   - Parameters: id, top_k, country, language, currency
+
+4. **Brands List** - `/brands_list` (GET)
+   - Get the list of all brands in catalogue
+
+5. **Image Query Similarity** - `/image_query_similarity` (GET)
+   - Get similarity score between an image query and an image URL
+   - Parameters: query, img_url
+
+6. **Data Ingestion** - `/ingest` (POST)
+   - Ingest data into Weaviate from BigQuery
+
+For detailed usage of each endpoint, refer to the Swagger documentation.
+
+<!-- ## 📈 Monitoring
+
+Prometheus metrics available at `/metrics` endpoint (requires authentication) -->
 
 ## 🤝 Support
 
